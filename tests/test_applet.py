@@ -48,3 +48,10 @@ def test_isolated_runner_supports_both_applet_uuids() -> None:
     assert "history-dispatcher@H234598" in runner
     assert "teebotus@H234598" in runner
     assert "bubblewrap" in runner or "bwrap" in runner
+
+
+def test_installer_is_transactional_and_has_dry_run() -> None:
+    installer = (ROOT / "scripts" / "install_cinnamon_applet.py").read_text(encoding="utf-8")
+    assert "--dry-run" in installer
+    assert ".previous" in installer
+    assert "except Exception" in installer

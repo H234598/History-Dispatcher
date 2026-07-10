@@ -28,16 +28,32 @@ def main(argv: list[str] | None = None) -> int:
     if staging.exists():
         shutil.rmtree(staging)
     shutil.copytree(source, staging)
-    if target.exists():
-        backup = target.parent / f".{APPLET_UUID}.previous"
-        if backup.exists():
-            shutil.rmtree(backup)
-        target.rename(backup)
-    staging.rename(target)
+    backup = target.parent / f".{APPLET_UUID}.previous"
+    try:
+        if target.exists() or target.is_symlink():
+            if backup.exists() or backup.is_symlink():
+                if backup.is_dir() and not backup.is_symlink():
+                    shutil.rmtree(backup)
+                else:
+                    backup.unlink()
+            target.rename(backup)
+        staging.rename(target)
+    except Exception:
+        try:
+            if target.exists() or target.is_symlink():
+                if target.is_dir() and not target.is_symlink():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            if backup.exists() or backup.is_symlink():
+                backup.rename(target)
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging)
+        raise
     print("status=installed")
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
