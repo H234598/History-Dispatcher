@@ -49,6 +49,7 @@ def _parser() -> argparse.ArgumentParser:
     retry = sub.add_parser("retry")
     retry.add_argument("--item-id", required=True)
     retry.add_argument("--reason", default="")
+    sub.add_parser("collect")
     return parser
 
 
@@ -125,6 +126,10 @@ def main(argv: list[str] | None = None) -> int:
         response = _call(config, "dispatch.retry", {"item_id": args.item_id, "reason": args.reason})
         _json_print(response.get("data", response))
         return 0 if response.get("ok") else 1
+    if args.command == "collect":
+        response = _call(config, "collector.collect", {})
+        _json_print(response.get("data", response))
+        return 0 if response.get("ok") else 1
     return 2
 
 
@@ -140,4 +145,3 @@ def _call(config, operation: str, body: dict[str, Any]) -> dict[str, Any]:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

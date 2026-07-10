@@ -23,8 +23,8 @@ OPERATIONS = (
     "protocol.describe", "health.get", "status.get", "report.get",
     "history.append", "history.query",
     "dispatch.claim", "dispatch.complete", "dispatch.retry",
-    "delivery.record", "config.get", "config.validate", "config.apply",
-    "admin.preview", "admin.execute", "audit.query",
+   "delivery.record", "config.get", "config.validate", "config.apply",
+    "collector.collect", "admin.preview", "admin.execute", "audit.query",
 )
 
 
@@ -135,6 +135,9 @@ class DispatcherService:
             return self.store.retry(str(body.get("item_id") or ""), reason=str(body.get("reason") or ""))
         if operation == "delivery.record":
             return self.store.record_delivery(body)
+        if operation == "collector.collect":
+            from .collector import Collector
+            return Collector(self.config, self.store).collect_once().as_dict()
         if operation == "admin.preview":
             preview = self.store.preview_delete(status=str(body.get("status") or ""), limit=int(body.get("limit", 100)))
             token = secrets.token_urlsafe(24)
