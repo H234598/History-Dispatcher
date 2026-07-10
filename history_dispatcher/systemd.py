@@ -22,7 +22,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-WorkingDirectory={Path(executable).parent.parent}
+WorkingDirectory={Path(executable).parent.parent.parent}
 ExecStart={executable} -m history_dispatcher --config {config_text} serve
 Restart=on-failure
 RestartSec=5s
@@ -110,4 +110,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
