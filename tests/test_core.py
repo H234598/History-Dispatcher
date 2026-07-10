@@ -90,3 +90,18 @@ def test_socket_round_trip(tmp_path: Path) -> None:
     assert response["ok"] and response["data"]["protocol_version"] == 1
     control.shutdown()
     thread.join(timeout=2)
+
+
+def test_safe_config_apply_writes_valid_toml(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    result = service.handle(request("config.apply", {
+        "values": {
+            "dispatch_paused": True,
+            "dispatch_batch_size": 7,
+            "collector_interval_seconds": 600,
+        },
+    }))
+    assert result["ok"]
+    assert result["data"]["config"]["dispatch"]["paused"] is True
+    assert result["data"]["config"]["dispatch"]["batch_size"] == 7
+    assert load_config(service.config.config_path).dispatch_paused is True

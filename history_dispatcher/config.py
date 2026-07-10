@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import os
+import json
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -215,3 +216,103 @@ def public_config(config: DispatcherConfig) -> dict[str, Any]:
             for source in config.sources
         ],
     }
+
+
+SAFE_CONFIG_KEYS = frozenset({
+    "log_level",
+    "status_heartbeat_seconds",
+    "collector_enabled",
+    "collector_interval_seconds",
+    "collector_scan_limit",
+    "dispatch_enabled",
+    "dispatch_paused",
+    "dispatch_batch_size",
+    "claim_ttl_seconds",
+    "max_attempts",
+    "completed_retention_days",
+    "audit_retention_days",
+})
+
+
+def apply_safe_values(config: DispatcherConfig, values: dict[str, Any]) -> DispatcherConfig:
+    unknown = set(values) - SAFE_CONFIG_KEYS
+    if unknown:
+        raise ValueError("unsupported config keys: " + ", ".join(sorted(unknown)))
+    changes: dict[str, Any] = {}
+    if "log_level" in values:
+        level = str(values["log_level"]).strip().upper()
+        if level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            raise ValueError("log_level is invalid")
+        changes["log_level"] = level
+    if "status_heartbeat_seconds" in values:
+        changes["status_heartbeat_seconds"] = _positive(values["status_heartbeat_seconds"], "status_heartbeat_seconds", maximum=3600)
+    for key in ("collector_enabled", "dispatch_enabled", "dispatch_paused"):
+        if key in values:
+            if not isinstance(values[key], bool):
+                raise ValueError(f"{key} must be boolean")
+            changes[key] = values[key]
+    for key, maximum in (
+        ("collector_interval_seconds", 24 * 3600),
+        ("collector_scan_limit", 10000),
+        ("dispatch_batch_size", 1000),
+        ("claim_ttl_seconds", 7 * 24 * 3600),
+        ("max_attempts", 1000),
+        ("completed_retention_days", 3650),
+        ("audit_retention_days", 3650),
+    ):
+        if key in values:
+            changes[key] = _positive(values[key], key, maximum=maximum)
+    return replace(config, **changes)
+
+
+def write_config(config: DispatcherConfig) -> None:
+    config.config_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lines = [
+        "[core]",
+        f"timezone = {json.dumps(config.timezone)}",
+        f"log_level = {json.dumps(config.log_level)}",
+        f"status_heartbeat_seconds = {config.status_heartbeat_seconds}",
+        "",
+        "[api]",
+        f"runtime_dir = {json.dumps(str(config.runtime_dir))}",
+        f"socket_path = {json.dumps(str(config.socket_path))}",
+        f"frame_limit_bytes = {config.frame_limit_bytes}",
+        "",
+        "[storage]",
+        f"state_dir = {json.dumps(str(config.state_dir))}",
+        f"database_path = {json.dumps(str(config.database_path))}",
+        "",
+        "[collector]",
+        f"enabled = {str(config.collector_enabled).lower()}",
+        f"interval_seconds = {config.collector_interval_seconds}",
+        f"scan_limit = {config.collector_scan_limit}",
+        "",
+        "[dispatch]",
+        f"enabled = {str(config.dispatch_enabled).lower()}",
+        f"paused = {str(config.dispatch_paused).lower()}",
+        f"batch_size = {config.dispatch_batch_size}",
+        f"claim_ttl_seconds = {config.claim_ttl_seconds}",
+        f"retry_delays_seconds = [{', '.join(str(value) for value in config.retry_delays_seconds)}]",
+        f"max_attempts = {config.max_attempts}",
+        "",
+        "[retention]",
+        f"completed_days = {config.completed_retention_days}",
+        f"audit_days = {config.audit_retention_days}",
+    ]
+    for source in config.sources:
+        lines.extend([
+            "",
+            "[[sources.codex]]",
+            f"name = {json.dumps(source.name)}",
+            f"enabled = {str(source.enabled).lower()}",
+            f"roots = [{', '.join(json.dumps(str(root)) for root in source.roots)}]",
+            f"scan_limit = {source.scan_limit}",
+            f"max_file_bytes = {source.max_file_bytes}",
+        ])
+    temporary = config.config_path.with_name(f".{config.config_path.name}.{os.getpid()}.tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, config.config_path)

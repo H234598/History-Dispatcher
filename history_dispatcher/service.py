@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .config import DispatcherConfig, load_config, public_config
+from .config import DispatcherConfig, apply_safe_values, load_config, public_config, write_config
 from .crypto import SecretServiceKeyProvider
 from .protocol import ProtocolError, encode_message, read_message
 from .store import DispatcherStore
@@ -122,7 +122,13 @@ class DispatcherService:
             checked = load_config(candidate)
             return {"ok": True, "config": public_config(checked)}
         if operation == "config.apply":
-            return {"ok": False, "error": "config_apply_requires_validated_file", "hint": "write TOML atomically and call config.validate before restart"}
+            values = body.get("values")
+            if not isinstance(values, dict):
+                return {"ok": False, "error": "values_must_be_object"}
+            new_config = apply_safe_values(self.config, values)
+            write_config(new_config)
+            self.config = load_config(new_config.config_path)
+            return {"ok": True, "config": public_config(self.config), "restart_required": False}
         if operation == "history.append":
             return self.store.append(body, idempotency_key=str(body.get("idempotency_key") or ""))
         if operation == "history.query":

@@ -23,8 +23,12 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("serve")
     status = sub.add_parser("status")
     status.add_argument("--json", action="store_true")
+    applet_status = sub.add_parser("applet-status")
+    applet_status.add_argument("--json", action="store_true")
     config = sub.add_parser("config")
     config.add_argument("action", choices=("check", "show"))
+    config_apply = sub.add_parser("config-apply")
+    config_apply.add_argument("--values-json", required=True)
     protocol = sub.add_parser("protocol")
     protocol.add_argument("--json", action="store_true")
     append = sub.add_parser("append")
@@ -65,6 +69,18 @@ def main(argv: list[str] | None = None) -> int:
         else:
             _json_print(public_config(config))
         return 0
+    if args.command == "config-apply":
+        try:
+            values = json.loads(args.values_json)
+        except json.JSONDecodeError as exc:
+            print(f"invalid config values JSON: {exc}", file=sys.stderr)
+            return 2
+        if not isinstance(values, dict):
+            print("config values must be an object", file=sys.stderr)
+            return 2
+        response = _call(config, "config.apply", {"values": values})
+        _json_print(response.get("data", response))
+        return 0 if response.get("ok") else 1
     if args.command == "status":
         response = _call(config, "status.get", {})
         if response.get("ok"):
@@ -76,6 +92,19 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         _json_print(response)
         return 1
+    if args.command == "applet-status":
+        snapshot = config.snapshot_path
+        try:
+            if snapshot.stat().st_size > 64 * 1024:
+                raise ValueError("status snapshot exceeds 64 KiB")
+            payload = json.loads(snapshot.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+                raise ValueError("invalid status snapshot")
+            _json_print(payload)
+            return 0
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            _json_print({"schema_version": 1, "ok": False, "service": "history-dispatcher", "degraded": True, "error": str(exc)[:240]})
+            return 1
     if args.command == "protocol":
         response = _call(config, "protocol.describe", {})
         _json_print(response.get("data", response))
