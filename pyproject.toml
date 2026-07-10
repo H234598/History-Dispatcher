@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "history-dispatcher"
+version = "0.1.0"
+description = "Standalone encrypted history collection and dispatch service"
+requires-python = ">=3.13"
+dependencies = ["cryptography>=42"]
+
+[project.scripts]
+history-dispatcher = "history_dispatcher.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
