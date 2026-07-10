@@ -20,6 +20,7 @@ Ergebnisse:
 | `--applets both` Lauf 1 | 20 s | PASS | beide | 0 |
 | `--applets both` Lauf 2 | 20 s | PASS | beide | 0 |
 | `--applets both` Lauf 3 | 20 s | PASS | beide | 0 |
+| `--applets both` Abschlusslauf | 12 s | PASS | beide | 0 |
 
 Jeder Lauf endete erwartungsgemäß durch die Runner-Zeitbegrenzung mit
 Cinnamon-Rückgabecode `-15`; während der Laufzeit blieb der Cinnamon-Prozess
@@ -29,7 +30,7 @@ bestehen. Die Logs enthielten keine `JS ERROR`, `TypeError`, `ReferenceError`,
 Zusätzliche Gates:
 
 ```text
-History-Dispatcher: 17 passed
+History-Dispatcher: 18 passed
 TeeBotus-Applet: 172 passed
 Node --check: beide Applets erfolgreich
 ```
