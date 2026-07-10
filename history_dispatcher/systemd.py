@@ -55,12 +55,9 @@ Requires=history-dispatcher.service
 [Service]
 Type=oneshot
 ExecStart={executable} -m history_dispatcher --config {config_text} collect
-StateDirectory=history-dispatcher
-StateDirectoryMode=0700
-RuntimeDirectory=history-dispatcher
-RuntimeDirectoryMode=0700
-ConfigurationDirectory=history-dispatcher
-ConfigurationDirectoryMode=0700
+# The long-lived service owns these directories.  Re-declaring
+# RuntimeDirectory/StateDirectory here would let systemd remove the shared
+# runtime socket when this oneshot collector exits.
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes

@@ -15,3 +15,7 @@ def test_systemd_units_are_oneshot_and_local_only(tmp_path: Path) -> None:
         assert "PrivateTmp=yes" in text
         assert "MemoryDenyWriteExecute=yes" in text
         assert "ProtectSystem=strict" in text
+    collector = units["history-dispatcher-collector.service"]
+    assert "RuntimeDirectory=history-dispatcher" not in collector
+    assert "StateDirectory=history-dispatcher" not in collector
+    assert "ConfigurationDirectory=history-dispatcher" not in collector
