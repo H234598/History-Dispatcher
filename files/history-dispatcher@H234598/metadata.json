@@ -1,7 +1,7 @@
 {
   "uuid": "history-dispatcher@H234598",
   "name": "History-Dispatcher",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Safe local status and administration for History-Dispatcher.",
   "comments": "Reads only the bounded local History-Dispatcher status snapshot.",
   "icon": "history-dispatcher",

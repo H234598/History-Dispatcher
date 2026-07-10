@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 - 2026-07-10
+
+- Enforce `dispatch.enabled` and `dispatch.paused` at the claim API boundary.
+  Paused or disabled dispatch now fails closed without changing queue state.
+
 ## 0.1.1 - 2026-07-10
 
 - Add a complete strict `config.example.toml` for service and applet setup.

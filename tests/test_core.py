@@ -58,6 +58,22 @@ def test_append_deduplicates_and_claim_complete(tmp_path: Path) -> None:
     assert completed == {"ok": True, "data": {"ok": True, "item_id": item_id, "status": "delivered"}}
 
 
+def test_dispatch_claim_is_fail_closed_when_paused_or_disabled(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    service.handle(request("history.append", {"dedupe_key": "paused", "payload": {"x": 1}}))
+    service.config = service.config.__class__(**{**service.config.__dict__, "dispatch_paused": True})
+
+    paused = service.handle(request("dispatch.claim", {"worker_id": "worker", "limit": 1}))
+
+    assert paused == {"ok": True, "data": {"items": [], "blocked": True, "reason": "dispatch_paused"}}
+    service.config = service.config.__class__(**{**service.config.__dict__, "dispatch_paused": False, "dispatch_enabled": False})
+
+    disabled = service.handle(request("dispatch.claim", {"worker_id": "worker", "limit": 1}))
+
+    assert disabled == {"ok": True, "data": {"items": [], "blocked": True, "reason": "dispatch_disabled"}}
+    assert service.store.status()["queued"] == 1
+
+
 def test_mutating_request_id_is_replayed_idempotently(tmp_path: Path) -> None:
     service = _service(tmp_path)
     message = request("history.append", {"dedupe_key": "request-1", "payload": {"x": 1}})

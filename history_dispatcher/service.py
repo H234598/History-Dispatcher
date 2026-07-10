@@ -169,6 +169,10 @@ class DispatcherService:
         if operation == "history.query":
             return {"items": self.store.query(status=str(body.get("status") or ""), limit=int(body.get("limit", 20)), include_payload=bool(body.get("include_payload", False)))}
         if operation == "dispatch.claim":
+            if not self.config.dispatch_enabled:
+                return {"items": [], "blocked": True, "reason": "dispatch_disabled"}
+            if self.config.dispatch_paused:
+                return {"items": [], "blocked": True, "reason": "dispatch_paused"}
             return {"items": self.store.claim(worker_id=str(body.get("worker_id") or ""), limit=int(body.get("limit", self.config.dispatch_batch_size)), claim_ttl_seconds=self.config.claim_ttl_seconds)}
         if operation == "dispatch.complete":
             attempt_count = self.store.attempt_count(str(body.get("item_id") or ""))
