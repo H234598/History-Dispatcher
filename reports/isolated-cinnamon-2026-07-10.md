@@ -29,8 +29,7 @@ bestehen. Die Logs enthielten keine `JS ERROR`, `TypeError`, `ReferenceError`,
 Zusätzliche Gates:
 
 ```text
-History-Dispatcher: 16 passed
+History-Dispatcher: 17 passed
 TeeBotus-Applet: 172 passed
 Node --check: beide Applets erfolgreich
 ```
-
