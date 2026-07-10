@@ -31,6 +31,7 @@ def test_applet_has_no_nul_or_blocking_shell_path() -> None:
     assert "MAX_SNAPSHOT_BYTES = 64 * 1024" in source
     assert "generation !== this.generation" in source
     assert "on_applet_removed_from_panel" in source
+    assert "applet-action" in source
 
 
 def test_applet_javascript_parses() -> None:
@@ -39,3 +40,11 @@ def test_applet_javascript_parses() -> None:
         pytest.skip("node is unavailable")
     result = subprocess.run(["node", "--check", str(APPLET / "applet.js")], capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
+
+
+def test_isolated_runner_supports_both_applet_uuids() -> None:
+    runner = (ROOT / "scripts" / "run_isolated_cinnamon_applet.py").read_text(encoding="utf-8")
+    assert "--applets" in runner
+    assert "history-dispatcher@H234598" in runner
+    assert "teebotus@H234598" in runner
+    assert "bubblewrap" in runner or "bwrap" in runner

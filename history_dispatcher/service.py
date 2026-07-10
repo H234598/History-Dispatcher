@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .config import DispatcherConfig, apply_safe_values, load_config, public_config, write_config
+from .config import DispatcherConfig, apply_safe_values, config_revision, load_config, public_config, write_config
 from .crypto import SecretServiceKeyProvider
 from .protocol import ProtocolError, encode_message, read_message
 from .store import DispatcherStore
@@ -25,7 +25,14 @@ OPERATIONS = (
     "dispatch.claim", "dispatch.complete", "dispatch.retry",
    "delivery.record", "config.get", "config.validate", "config.apply",
     "collector.collect", "admin.preview", "admin.execute", "audit.query",
+    "migration.import_legacy",
+    "maintenance.prune",
 )
+IDEMPOTENT_OPERATIONS = frozenset({
+    "history.append", "dispatch.claim", "dispatch.complete", "dispatch.retry", "delivery.record",
+    "config.apply", "collector.collect", "admin.execute", "migration.import_legacy",
+    "maintenance.prune",
+})
 
 
 def _timestamp() -> str:
@@ -41,11 +48,14 @@ class DispatcherService:
         self._started_at = _timestamp()
         self._last_operation = ""
         self._last_error = ""
-        self._tokens: dict[str, tuple[list[str], int, float]] = {}
+        self._last_collection: dict[str, Any] = {}
+        self._last_delivery: dict[str, Any] = {}
+        self._tokens: dict[str, tuple[list[str], str, float]] = {}
         self._write_snapshot()
 
     def _status(self) -> dict[str, Any]:
         status = self.store.status()
+        preview_rows = self.store.query(limit=20, include_payload=False)
         status.update({
             "schema_version": 1,
             "service": "history-dispatcher",
@@ -55,6 +65,18 @@ class DispatcherService:
             "started_at": self._started_at,
             "last_operation": self._last_operation,
             "last_error": self._last_error,
+            "last_collection": dict(self._last_collection),
+            "last_delivery": dict(self._last_delivery),
+            "queue_preview": [
+                {
+                    "id": str(item.get("id") or ""),
+                    "status": str(item.get("status") or ""),
+                    "kind": str(item.get("kind") or ""),
+                    "created_at": str(item.get("created_at") or ""),
+                    "last_error": str(item.get("last_error") or "")[:160],
+                }
+                for item in preview_rows
+            ],
             "collector": {
                 "enabled": self.config.collector_enabled,
                 "interval_seconds": self.config.collector_interval_seconds,
@@ -91,18 +113,28 @@ class DispatcherService:
         if not isinstance(request, dict):
             return {"ok": False, "error": {"code": "invalid_request", "message": "request must be an object"}}
         operation = str(request.get("operation") or "").strip()
+        request_id = str(request.get("request_id") or "").strip()
         body = request.get("body") if isinstance(request.get("body"), dict) else {}
         if int(request.get("protocol_version", 0) or 0) != 1:
             return {"ok": False, "error": {"code": "unsupported_protocol", "message": "protocol_version must be 1"}}
         if operation not in OPERATIONS:
             return {"ok": False, "error": {"code": "unknown_operation", "message": "unknown operation"}}
+        if operation in IDEMPOTENT_OPERATIONS and request_id:
+            if len(request_id) > 128 or any(ord(char) < 0x20 for char in request_id):
+                return {"ok": False, "error": {"code": "invalid_request_id", "message": "request_id is invalid"}}
+            cached = self.store.get_idempotent_response(request_id, operation)
+            if cached is not None:
+                return cached
         try:
             result = self._dispatch(operation, body)
             with self._lock:
                 self._last_operation = operation
                 self._last_error = ""
                 self._write_snapshot()
-            return {"ok": True, "data": result}
+            response = {"ok": True, "data": result}
+            if operation in IDEMPOTENT_OPERATIONS and request_id:
+                self.store.save_idempotent_response(request_id, operation, response)
+            return response
         except Exception as exc:  # API boundary: never expose internal traceback.
             with self._lock:
                 self._last_operation = operation
@@ -125,6 +157,9 @@ class DispatcherService:
             values = body.get("values")
             if not isinstance(values, dict):
                 return {"ok": False, "error": "values_must_be_object"}
+            expected_revision = str(body.get("expected_revision") or "").strip()
+            if expected_revision and expected_revision != config_revision(self.config):
+                return {"ok": False, "error": "config_revision_changed", "config_revision": config_revision(self.config)}
             new_config = apply_safe_values(self.config, values)
             write_config(new_config)
             self.config = load_config(new_config.config_path)
@@ -136,18 +171,47 @@ class DispatcherService:
         if operation == "dispatch.claim":
             return {"items": self.store.claim(worker_id=str(body.get("worker_id") or ""), limit=int(body.get("limit", self.config.dispatch_batch_size)), claim_ttl_seconds=self.config.claim_ttl_seconds)}
         if operation == "dispatch.complete":
-            return self.store.complete(item_id=str(body.get("item_id") or ""), worker_id=str(body.get("worker_id") or ""), recipient_results=body.get("recipient_results", []), reason=str(body.get("reason") or ""))
+            attempt_count = self.store.attempt_count(str(body.get("item_id") or ""))
+            retry_index = min(attempt_count, len(self.config.retry_delays_seconds) - 1)
+            recipient_results = body.get("recipient_results", [])
+            if not isinstance(recipient_results, list):
+                return {"ok": False, "error": "recipient_results_must_be_array"}
+            return self.store.complete(
+                item_id=str(body.get("item_id") or ""),
+                worker_id=str(body.get("worker_id") or ""),
+                recipient_results=recipient_results,
+                reason=str(body.get("reason") or ""),
+                retry_delay_seconds=self.config.retry_delays_seconds[retry_index],
+                max_attempts=self.config.max_attempts,
+            )
         if operation == "dispatch.retry":
             return self.store.retry(str(body.get("item_id") or ""), reason=str(body.get("reason") or ""))
         if operation == "delivery.record":
-            return self.store.record_delivery(body)
+            result = self.store.record_delivery(body)
+            self._last_delivery = {"at": _timestamp(), "ok": bool(result.get("ok")), "event_id": str(result.get("event_id") or "")}
+            return result
         if operation == "collector.collect":
             from .collector import Collector
-            return Collector(self.config, self.store).collect_once().as_dict()
+            result = Collector(self.config, self.store).collect_once().as_dict()
+            self._last_collection = {"at": _timestamp(), **result}
+            return result
+        if operation == "migration.import_legacy":
+            from .migration import migrate_legacy_jsonl
+            path = Path(str(body.get("path") or "")).expanduser()
+            return migrate_legacy_jsonl(path, self.store, dry_run=bool(body.get("dry_run")))
+        if operation == "maintenance.prune":
+            return self.store.prune(completed_days=self.config.completed_retention_days, audit_days=self.config.audit_retention_days)
         if operation == "admin.preview":
-            preview = self.store.preview_delete(status=str(body.get("status") or ""), limit=int(body.get("limit", 100)))
+            ids = body.get("ids", [])
+            if not isinstance(ids, list):
+                ids = []
+            preview = self.store.preview_delete(
+                status=str(body.get("status") or ""),
+                limit=int(body.get("limit", 100)),
+                ids=[str(item) for item in ids],
+            )
             token = secrets.token_urlsafe(24)
-            self._tokens[token] = (preview["ids"], int(preview["revision"]), time.monotonic() + 30)
+            self._tokens[token] = (preview["ids"], str(preview["revision"]), time.monotonic() + 30)
             preview["confirmation_token"] = token
             preview["expires_in_seconds"] = 30
             return preview

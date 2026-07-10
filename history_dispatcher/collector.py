@@ -41,6 +41,11 @@ class Collector:
         if source_config is None or not self.config.collector_enabled:
             return CollectionReport(True, "codex", 0, 0, 0, 0, ())
         source = CodexJsonlSource(source_config.roots, scan_limit=min(self.config.collector_scan_limit, source_config.scan_limit), max_file_bytes=source_config.max_file_bytes)
+        self.store.register_source(
+            source_config.name,
+            enabled=source_config.enabled,
+            config={"roots": [str(root) for root in source_config.roots], "scan_limit": source_config.scan_limit, "max_file_bytes": source_config.max_file_bytes},
+        )
         scanned = imported = duplicates = skipped = 0
         errors: list[str] = []
         for item in source.items():
@@ -50,9 +55,15 @@ class Collector:
             except Exception as exc:  # One damaged source must not stop the scan.
                 errors.append(f"{type(exc).__name__}: {str(exc)[:240]}")
                 continue
+            source_path = str(((item.get("payload") or {}).get("summary") or {}).get("source_path") or "")
+            if source_path:
+                try:
+                    stat = Path(source_path).stat()
+                    self.store.record_source_cursor(source.name, source_path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns, imported=not bool(result.get("deduplicated")))
+                except OSError:
+                    pass
             if result.get("deduplicated"):
                 duplicates += 1
             else:
                 imported += 1
         return CollectionReport(not errors, "codex", scanned, imported, duplicates, skipped, tuple(errors))
-

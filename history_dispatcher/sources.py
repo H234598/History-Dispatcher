@@ -150,6 +150,7 @@ class CodexJsonlSource:
                             "bullets": _bullets(text),
                             "tests": _tests(text),
                             "text": text[:12000],
+                            "source_path": str(path),
                         },
                     },
                 }

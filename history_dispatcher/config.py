@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import hashlib
 import tomllib
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -42,9 +43,14 @@ def _path(value: object, name: str) -> Path:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty path")
     text = value.strip()
-    if "\\x00" in text:
+    if "\x00" in text:
         raise ValueError(f"{name} contains NUL")
-    return Path(text).expanduser()
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        raise ValueError(f"{name} must be absolute")
+    if any(part == ".." for part in path.parts):
+        raise ValueError(f"{name} contains a parent traversal")
+    return path
 
 
 @dataclass(frozen=True)
@@ -117,13 +123,39 @@ def load_config(path: Path | None = None) -> DispatcherConfig:
     collector = raw.get("collector", {})
     dispatch = raw.get("dispatch", {})
     retention = raw.get("retention", {})
+    applet_policy = raw.get("applet_policy", {})
+    allowed_root = {"core", "api", "storage", "collector", "dispatch", "retention", "sources", "applet_policy"}
+    unknown_root = set(raw) - allowed_root
+    if unknown_root:
+        raise ValueError("unknown config sections: " + ", ".join(sorted(unknown_root)))
     if not all(isinstance(section, dict) for section in (core, api, storage, collector, dispatch, retention)):
         raise ValueError("config sections must be tables")
+    if not isinstance(applet_policy, dict):
+        raise ValueError("applet_policy must be a table")
+    section_keys = {
+        "core": {"timezone", "log_level", "status_heartbeat_seconds"},
+        "api": {"runtime_dir", "socket_path", "frame_limit_bytes"},
+        "storage": {"state_dir", "database_path"},
+        "collector": {"enabled", "interval_seconds", "scan_limit"},
+        "dispatch": {"enabled", "paused", "batch_size", "claim_ttl_seconds", "retry_delays_seconds", "max_attempts"},
+        "retention": {"completed_days", "audit_days"},
+        "applet_policy": {"allow_service_actions", "allow_collect", "allow_retry", "allow_delete"},
+    }
+    for section_name, section in (("core", core), ("api", api), ("storage", storage), ("collector", collector), ("dispatch", dispatch), ("retention", retention), ("applet_policy", applet_policy)):
+        unknown = set(section) - section_keys[section_name]
+        if unknown:
+            raise ValueError(f"unknown config keys in [{section_name}]: " + ", ".join(sorted(unknown)))
+    sources_table = raw.get("sources", {})
+    if not isinstance(sources_table, dict):
+        raise ValueError("sources must be a table")
+    unknown_sources = set(sources_table) - {"codex"}
+    if unknown_sources:
+        raise ValueError("unknown config source tables: " + ", ".join(sorted(unknown_sources)))
     state_dir = _path(storage.get("state_dir", str(base.state_dir)), "storage.state_dir")
     runtime_dir = _path(api.get("runtime_dir", str(base.runtime_dir)), "api.runtime_dir")
     database_path = _path(storage.get("database_path", str(state_dir / "history.sqlite3")), "storage.database_path")
     socket_path = _path(api.get("socket_path", str(runtime_dir / "control.sock")), "api.socket_path")
-    raw_sources = raw.get("sources", {}).get("codex", []) if isinstance(raw.get("sources", {}), dict) else []
+    raw_sources = sources_table.get("codex", [])
     if isinstance(raw_sources, dict):
         raw_sources = [raw_sources]
     if not isinstance(raw_sources, list):
@@ -132,6 +164,9 @@ def load_config(path: Path | None = None) -> DispatcherConfig:
     for index, item in enumerate(raw_sources):
         if not isinstance(item, dict):
             raise ValueError(f"sources.codex[{index}] must be a table")
+        unknown_source_keys = set(item) - {"name", "enabled", "roots", "scan_limit", "max_file_bytes"}
+        if unknown_source_keys:
+            raise ValueError(f"unknown keys in sources.codex[{index}]: " + ", ".join(sorted(unknown_source_keys)))
         name = str(item.get("name", "codex")).strip()
         if not name or len(name) > 96:
             raise ValueError(f"sources.codex[{index}].name is invalid")
@@ -177,8 +212,14 @@ def load_config(path: Path | None = None) -> DispatcherConfig:
     )
 
 
-def public_config(config: DispatcherConfig) -> dict[str, Any]:
-    return {
+def config_revision(config: DispatcherConfig) -> str:
+    """Return a stable revision for optimistic config updates."""
+    value = public_config(config, include_revision=False)
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def public_config(config: DispatcherConfig, *, include_revision: bool = True) -> dict[str, Any]:
+    value = {
         "config_path": str(config.config_path),
         "state_dir": str(config.state_dir),
         "runtime_dir": str(config.runtime_dir),
@@ -216,6 +257,8 @@ def public_config(config: DispatcherConfig) -> dict[str, Any]:
             for source in config.sources
         ],
     }
+    value["config_revision"] = config_revision(config) if include_revision else ""
+    return value
 
 
 SAFE_CONFIG_KEYS = frozenset({
@@ -315,4 +358,11 @@ def write_config(config: DispatcherConfig) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     os.chmod(temporary, 0o600)
+    if config.config_path.exists():
+        backup = config.config_path.with_name(f"{config.config_path.name}.bak")
+        with config.config_path.open("rb") as source, backup.open("wb") as target:
+            target.write(source.read())
+            target.flush()
+            os.fsync(target.fileno())
+        os.chmod(backup, 0o600)
     os.replace(temporary, config.config_path)

@@ -21,10 +21,18 @@
         "command-path",
         "refresh-seconds",
         "auto-refresh",
+        "log-level",
+        "status-heartbeat-seconds",
+        "collector-enabled",
         "collector-interval-seconds",
+        "collector-scan-limit",
+        "dispatch-enabled",
         "dispatch-paused",
         "dispatch-batch-size",
-        "max-attempts"
+        "claim-ttl-seconds",
+        "max-attempts",
+        "completed-retention-days",
+        "audit-retention-days"
       ]
     },
     "display-section": {
@@ -66,6 +74,25 @@
     "description": "Refresh automatically",
     "default": true
   },
+  "log-level": {
+    "type": "combobox",
+    "description": "Service log level",
+    "options": {"Debug": "DEBUG", "Info": "INFO", "Warning": "WARNING", "Error": "ERROR", "Critical": "CRITICAL"},
+    "default": "INFO"
+  },
+  "status-heartbeat-seconds": {
+    "type": "spinbutton",
+    "description": "Status heartbeat in seconds",
+    "min": 1,
+    "max": 3600,
+    "step": 1,
+    "default": 30
+  },
+  "collector-enabled": {
+    "type": "switch",
+    "description": "Enable Codex collector",
+    "default": true
+  },
   "collector-interval-seconds": {
     "type": "spinbutton",
     "description": "Collector interval in seconds",
@@ -73,6 +100,19 @@
     "max": 86400,
     "step": 60,
     "default": 300
+  },
+  "collector-scan-limit": {
+    "type": "spinbutton",
+    "description": "Maximum source files per collection",
+    "min": 1,
+    "max": 10000,
+    "step": 1,
+    "default": 25
+  },
+  "dispatch-enabled": {
+    "type": "switch",
+    "description": "Enable dispatch worker",
+    "default": true
   },
   "dispatch-paused": {
     "type": "switch",
@@ -87,6 +127,14 @@
     "step": 1,
     "default": 20
   },
+  "claim-ttl-seconds": {
+    "type": "spinbutton",
+    "description": "Claim lease lifetime in seconds",
+    "min": 1,
+    "max": 604800,
+    "step": 1,
+    "default": 900
+  },
   "max-attempts": {
     "type": "spinbutton",
     "description": "Maximum automatic attempts",
@@ -94,6 +142,22 @@
     "max": 1000,
     "step": 1,
     "default": 12
+  },
+  "completed-retention-days": {
+    "type": "spinbutton",
+    "description": "Completed history retention in days",
+    "min": 1,
+    "max": 3650,
+    "step": 1,
+    "default": 30
+  },
+  "audit-retention-days": {
+    "type": "spinbutton",
+    "description": "Audit/tombstone retention in days",
+    "min": 1,
+    "max": 3650,
+    "step": 1,
+    "default": 365
   },
   "show-collector": {
     "type": "switch",

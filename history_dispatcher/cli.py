@@ -53,7 +53,28 @@ def _parser() -> argparse.ArgumentParser:
     retry = sub.add_parser("retry")
     retry.add_argument("--item-id", required=True)
     retry.add_argument("--reason", default="")
+    preview = sub.add_parser("admin-preview")
+    preview.add_argument("--status", default="")
+    preview.add_argument("--ids-json", default="[]")
+    preview.add_argument("--limit", type=int, default=20)
+    execute = sub.add_parser("admin-execute")
+    execute.add_argument("--confirmation-token", required=True)
+    execute.add_argument("--confirmation", required=True)
+    execute.add_argument("--reason", default="")
+    delete_item = sub.add_parser("delete-item")
+    delete_item.add_argument("--item-id", required=True)
+    delete_item.add_argument("--reason", default="Applet deletion")
+    service_action = sub.add_parser("service-action")
+    service_action.add_argument("action", choices=("start", "stop", "restart"))
+    applet_action = sub.add_parser("applet-action")
+    applet_action.add_argument("--action", choices=("collect", "retry", "service-start", "service-stop", "service-restart"), required=True)
+    applet_action.add_argument("--item-id", default="")
+    applet_action.add_argument("--values-json", default="")
     sub.add_parser("collect")
+    migrate = sub.add_parser("migrate-legacy")
+    migrate.add_argument("--path", type=Path, required=True)
+    migrate.add_argument("--dry-run", action="store_true")
+    sub.add_parser("prune")
     return parser
 
 
@@ -155,8 +176,88 @@ def main(argv: list[str] | None = None) -> int:
         response = _call(config, "dispatch.retry", {"item_id": args.item_id, "reason": args.reason})
         _json_print(response.get("data", response))
         return 0 if response.get("ok") else 1
+    if args.command == "admin-preview":
+        try:
+            ids = json.loads(args.ids_json)
+        except json.JSONDecodeError as exc:
+            print(f"invalid ids JSON: {exc}", file=sys.stderr)
+            return 2
+        response = _call(config, "admin.preview", {"status": args.status, "ids": ids, "limit": args.limit})
+        _json_print(response.get("data", response))
+        return 0 if response.get("ok") else 1
+    if args.command == "admin-execute":
+        response = _call(config, "admin.execute", {
+            "confirmation_token": args.confirmation_token,
+            "confirmation": args.confirmation,
+            "reason": args.reason,
+        })
+        _json_print(response.get("data", response))
+        return 0 if response.get("ok") else 1
+    if args.command == "delete-item":
+        preview = _call(config, "admin.preview", {"ids": [args.item_id], "limit": 1})
+        preview_data = preview.get("data", {})
+        token = str(preview_data.get("confirmation_token") or "")
+        ids = preview_data.get("ids", [])
+        if not preview.get("ok") or len(ids) != 1 or not token:
+            _json_print(preview.get("data", preview))
+            return 1
+        response = _call(config, "admin.execute", {
+            "confirmation_token": token,
+            "confirmation": "LOESCHEN 1",
+            "reason": args.reason,
+        })
+        _json_print(response.get("data", response))
+        return 0 if response.get("ok") else 1
+    if args.command == "service-action":
+        import subprocess
+        completed = subprocess.run(
+            ["systemctl", "--user", args.action, "history-dispatcher.service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+        result = {"ok": completed.returncode == 0, "action": args.action, "stderr": completed.stderr[-1000:]}
+        _json_print(result)
+        return 0 if result["ok"] else 1
+    if args.command == "applet-action":
+        action = str(args.action)
+        if action == "collect":
+            response = _call(config, "collector.collect", {})
+        elif action == "retry":
+            if not args.item_id:
+                _json_print({"ok": False, "error": "missing_item_id"})
+                return 2
+            response = _call(config, "dispatch.retry", {"item_id": args.item_id, "reason": "Applet retry"})
+        else:
+            import subprocess
+            service_action = action.removeprefix("service-")
+            completed = subprocess.run(
+                ["systemctl", "--user", service_action, "history-dispatcher.service"],
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+            result = {"ok": completed.returncode == 0, "action": action, "stderr": completed.stderr[-1000:]}
+            _json_print(result)
+            return 0 if result["ok"] else 1
+        _json_print(response.get("data", response))
+        return 0 if response.get("ok") else 1
     if args.command == "collect":
         response = _call(config, "collector.collect", {})
+        _json_print(response.get("data", response))
+        return 0 if response.get("ok") else 1
+    if args.command == "migrate-legacy":
+        response = _call(config, "migration.import_legacy", {"path": str(args.path), "dry_run": bool(args.dry_run)})
+        _json_print(response.get("data", response))
+        return 0 if response.get("ok") else 1
+    if args.command == "prune":
+        response = _call(config, "maintenance.prune", {})
         _json_print(response.get("data", response))
         return 0 if response.get("ok") else 1
     return 2
