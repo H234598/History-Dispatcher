@@ -26,6 +26,9 @@ State is kept below `~/.local/state/history-dispatcher`; the owner-only control
 socket and the bounded `status-v1.json` snapshot are below
 `$XDG_RUNTIME_DIR/history-dispatcher`. The Codex collector scans only
 `~/.codex/sessions` and `~/.codex-agents/*/sessions` by default.
+`config.example.toml` contains a complete, strict configuration template for
+the service and Cinnamon applet; replace its `USERNAME` and runtime UID
+placeholders before installing it.
 
 Render hardened user units with:
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 - 2026-07-10
+
+- Add a complete strict `config.example.toml` for service and applet setup.
+
 ## 0.1.0 - 2026-07-10
 
 - Standalone encrypted SQLite history queue and versioned Unix-socket API.

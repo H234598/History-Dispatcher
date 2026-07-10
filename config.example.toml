@@ -1,0 +1,46 @@
+# Copy this file to ~/.config/history-dispatcher/config.toml and adjust the
+# absolute paths before starting the user service.
+
+[core]
+timezone = "Europe/Berlin"
+log_level = "INFO"
+status_heartbeat_seconds = 30
+
+[api]
+runtime_dir = "/run/user/1000/history-dispatcher"
+socket_path = "/run/user/1000/history-dispatcher/control.sock"
+frame_limit_bytes = 8388608
+
+[storage]
+state_dir = "/home/USERNAME/.local/state/history-dispatcher"
+database_path = "/home/USERNAME/.local/state/history-dispatcher/history.sqlite3"
+
+[collector]
+enabled = true
+interval_seconds = 300
+scan_limit = 25
+
+[dispatch]
+enabled = true
+paused = false
+batch_size = 20
+claim_ttl_seconds = 900
+retry_delays_seconds = [60, 300, 900, 3600, 21600]
+max_attempts = 12
+
+[retention]
+completed_days = 30
+audit_days = 365
+
+[sources.codex]
+name = "codex"
+enabled = true
+roots = ["/home/USERNAME/.codex/sessions", "/home/USERNAME/.codex-agents/agent/sessions"]
+scan_limit = 25
+max_file_bytes = 16777216
+
+[applet_policy]
+allow_service_actions = true
+allow_collect = true
+allow_retry = true
+allow_delete = true
