@@ -443,10 +443,9 @@ def test_preflight_backup_can_restore_original_v1_database(tmp_path: Path) -> No
     assert restored["ok"] is True
     assert restored["quick_check"] == "ok"
     assert stat.S_IMODE(restored_path.stat().st_mode) == 0o600
+    assert not list(tmp_path.glob("*.restore.tmp*"))
     assert _schema_versions(restored_path) == [1]
     assert "history_events" not in _table_names(restored_path)
-    assert not Path(f"{restored_path}-wal").exists()
-    assert not Path(f"{restored_path}-shm").exists()
     with sqlite3.connect(restored_path) as db:
         assert db.execute("SELECT COUNT(*) FROM history_items").fetchone()[0] == 3
         assert db.execute("SELECT COUNT(*) FROM recipient_results").fetchone()[0] == 3
