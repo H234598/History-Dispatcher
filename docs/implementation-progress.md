@@ -81,7 +81,7 @@
 - [x] PR #4 zunächst sauber auf PR #3 gestapelt und separat getestet.
 - [x] gestapelter Head `7758ed0181dc2b6f8d1bcc08b06df7444f7e9ef1`: GitHub Actions, qlty und CodeRabbit grün; keine Reviewthreads.
 - [x] nach Merge von PR #3 den Providercommit auf `main@ec3acf360cabc793835ecf3a8106fd1501897ba4` neu aufgebaut.
-- [ ] PR #4 auf `main` retargeten.
+- [x] PR #4 auf `main` retargetet.
 - [ ] GitHub Actions, qlty und CodeRabbit auf dem neuen finalen Head grün.
 - [ ] PR #4 aus dem Draft nehmen.
 - [ ] mögliche neue Reviewthreads bearbeiten und lösen.
