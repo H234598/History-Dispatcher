@@ -42,7 +42,7 @@ _RECIPIENT_STATES = tuple(state.value for state in RecipientDeliveryState)
 V2_DDL = f"""
 CREATE TABLE IF NOT EXISTS history_events (
     id TEXT PRIMARY KEY,
-    legacy_item_id TEXT UNIQUE REFERENCES history_items(id) ON DELETE RESTRICT,
+    legacy_item_id TEXT UNIQUE,
     source TEXT NOT NULL,
     source_instance TEXT NOT NULL DEFAULT '',
     dedupe_key TEXT NOT NULL UNIQUE,
@@ -209,6 +209,28 @@ CREATE TRIGGER IF NOT EXISTS trg_route_plans_immutable
 BEFORE UPDATE ON route_plans
 BEGIN
     SELECT RAISE(ABORT, 'route plans are immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_attempt_recipient_target_match_insert
+BEFORE INSERT ON delivery_attempts
+WHEN NEW.recipient_delivery_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM recipient_deliveries rd
+    WHERE rd.id=NEW.recipient_delivery_id
+      AND rd.target_delivery_id=NEW.target_delivery_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'recipient delivery does not belong to target delivery');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_attempt_recipient_target_match_update
+BEFORE UPDATE OF target_delivery_id, recipient_delivery_id ON delivery_attempts
+WHEN NEW.recipient_delivery_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM recipient_deliveries rd
+    WHERE rd.id=NEW.recipient_delivery_id
+      AND rd.target_delivery_id=NEW.target_delivery_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'recipient delivery does not belong to target delivery');
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_target_delivery_state_transition
