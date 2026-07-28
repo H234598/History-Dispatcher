@@ -1,31 +1,24 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-
-import pytest
 
 from history_dispatcher.classification import (
     CLASSIFICATION_SCHEMA_VERSION,
     AgentContext,
     ClassificationConfidence,
+    ClassificationReport,
     CodexRolloutClassifier,
     HistoryKind,
 )
-from history_dispatcher.redaction import redact_text, visible_output_text
+from history_dispatcher.redaction import visible_output_text
 
 
-FIXTURES = Path(__file__).parent / "fixtures" / "codex"
-
-
-def _classify(relative: str, **kwargs: object):
-    path = FIXTURES / relative
-    classifier = CodexRolloutClassifier(max_jsonl_line_bytes=16 * 1024)
-    return classifier.classify_lines(path.read_bytes().splitlines(), **kwargs)
-
-
-def test_root_turn_classifies_commentary_and_authoritative_completion() -> None:
-    report = _classify("current-main/root-turn.jsonl")
+def test_root_turn_classifies_commentary_and_authoritative_completion(
+    classify_fixture: Callable[..., ClassificationReport],
+) -> None:
+    report = classify_fixture("current-main/root-turn.jsonl")
 
     assert report.issues == ()
     assert [event.history_kind for event in report.events] == [
@@ -41,12 +34,17 @@ def test_root_turn_classifies_commentary_and_authoritative_completion() -> None:
     assert completion.text == "Die Aufgabe ist vollständig abgeschlossen."
     assert completion.agent_context is AgentContext.ROOT
     assert all(event.external_dispatchable for event in report.events)
-    assert all(event.classification_schema_version == CLASSIFICATION_SCHEMA_VERSION for event in report.events)
+    assert all(
+        event.classification_schema_version == CLASSIFICATION_SCHEMA_VERSION
+        for event in report.events
+    )
     assert "interne Begründung" not in json.dumps(report.as_dict(), ensure_ascii=False)
 
 
-def test_subagent_uses_parent_metadata_and_excludes_inherited_prefix() -> None:
-    report = _classify("subagents/subagent-late.jsonl")
+def test_subagent_uses_parent_metadata_and_excludes_inherited_prefix(
+    classify_fixture: Callable[..., ClassificationReport],
+) -> None:
+    report = classify_fixture("subagents/subagent-late.jsonl")
 
     assert [event.history_kind for event in report.events] == [
         HistoryKind.INTERMEDIATE_UPDATE,
@@ -62,8 +60,10 @@ def test_subagent_uses_parent_metadata_and_excludes_inherited_prefix() -> None:
     assert report.events[-1].source_ordinal == 6
 
 
-def test_phase_missing_with_explicit_completion_is_compatible() -> None:
-    report = _classify("current-main/phase-missing-complete.jsonl")
+def test_phase_missing_with_explicit_completion_is_compatible(
+    classify_fixture: Callable[..., ClassificationReport],
+) -> None:
+    report = classify_fixture("current-main/phase-missing-complete.jsonl")
 
     assert len(report.events) == 1
     event = report.events[0]
@@ -72,9 +72,11 @@ def test_phase_missing_with_explicit_completion_is_compatible() -> None:
     assert event.external_dispatchable is True
 
 
-def test_multiple_turns_have_distinct_stable_keys() -> None:
-    first = _classify("current-main/multi-turn.jsonl")
-    second = _classify("current-main/multi-turn.jsonl")
+def test_multiple_turns_have_distinct_stable_keys(
+    classify_fixture: Callable[..., ClassificationReport],
+) -> None:
+    first = classify_fixture("current-main/multi-turn.jsonl")
+    second = classify_fixture("current-main/multi-turn.jsonl")
 
     assert len(first.events) == 2
     assert [event.dedupe_key for event in first.events] == [
@@ -84,8 +86,10 @@ def test_multiple_turns_have_distinct_stable_keys() -> None:
     assert len({event.event_id for event in first.events}) == 2
 
 
-def test_unknown_future_rollout_type_is_fail_closed() -> None:
-    report = _classify("current-main/future-type.jsonl")
+def test_unknown_future_rollout_type_is_fail_closed(
+    classify_fixture: Callable[..., ClassificationReport],
+) -> None:
+    report = classify_fixture("current-main/future-type.jsonl")
 
     assert report.unknown_records == 1
     assert len(report.events) == 1
@@ -97,8 +101,10 @@ def test_unknown_future_rollout_type_is_fail_closed() -> None:
     assert event.text == ""
 
 
-def test_legacy_final_event_is_retained_but_not_externally_dispatchable() -> None:
-    report = _classify("legacy/final-event.jsonl")
+def test_legacy_final_event_is_retained_but_not_externally_dispatchable(
+    classify_fixture: Callable[..., ClassificationReport],
+) -> None:
+    report = classify_fixture("legacy/final-event.jsonl")
 
     assert len(report.events) == 1
     event = report.events[0]
@@ -108,8 +114,10 @@ def test_legacy_final_event_is_retained_but_not_externally_dispatchable() -> Non
     assert event.external_dispatchable is False
 
 
-def test_malformed_line_is_isolated_and_later_valid_record_is_processed() -> None:
-    fixture = (FIXTURES / "malformed/invalid-json.jsonl").read_bytes().splitlines()
+def test_malformed_line_is_isolated_and_later_valid_record_is_processed(
+    codex_fixture_root: Path,
+) -> None:
+    fixture = (codex_fixture_root / "malformed/invalid-json.jsonl").read_bytes().splitlines()
     fixture.append(
         json.dumps(
             {

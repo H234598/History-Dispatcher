@@ -2,6 +2,12 @@
   "classification_schema_version": 1,
   "files": [
     {
+      "expected_confidences": [
+        "ambiguous"
+      ],
+      "expected_external_dispatchable": [
+        false
+      ],
       "expected_history_kinds": [
         "unknown"
       ],
@@ -11,6 +17,14 @@
       "sha256": "b56c571348114b8d13f0078fdc49172e04c1175bb8b417bb27d85aa422e44326"
     },
     {
+      "expected_confidences": [
+        "authoritative",
+        "authoritative"
+      ],
+      "expected_external_dispatchable": [
+        true,
+        true
+      ],
       "expected_history_kinds": [
         "task_completion",
         "task_completion"
@@ -21,6 +35,12 @@
       "sha256": "d9ca09253af72a93af8169317fb32a24347b3d1f614a2e050ed2c497dcaad24f"
     },
     {
+      "expected_confidences": [
+        "compatible"
+      ],
+      "expected_external_dispatchable": [
+        true
+      ],
       "expected_history_kinds": [
         "task_completion"
       ],
@@ -30,6 +50,14 @@
       "sha256": "c47c723a0882564f9b500270f04db33f6888562393ffa7e7e0fc2d91f43c3af6"
     },
     {
+      "expected_confidences": [
+        "authoritative",
+        "authoritative"
+      ],
+      "expected_external_dispatchable": [
+        true,
+        true
+      ],
       "expected_history_kinds": [
         "intermediate_update",
         "task_completion"
@@ -40,6 +68,12 @@
       "sha256": "474ea71fab254a78194f4f846849889d4afbbed809018af8779d3f321a710e55"
     },
     {
+      "expected_confidences": [
+        "legacy"
+      ],
+      "expected_external_dispatchable": [
+        false
+      ],
       "expected_history_kinds": [
         "task_completion"
       ],
@@ -49,6 +83,8 @@
       "sha256": "8754163057efe39dde456ad5f0cad49843604e60d891b10f47a8d321654b00c4"
     },
     {
+      "expected_confidences": [],
+      "expected_external_dispatchable": [],
       "expected_history_kinds": [],
       "expected_issue_codes": [
         "invalid_json"
@@ -58,6 +94,14 @@
       "sha256": "e7a92d40cfc0f8cb57596b5143da98ffcafb2fe70b79e4c447a6ba76970fa957"
     },
     {
+      "expected_confidences": [
+        "authoritative",
+        "authoritative"
+      ],
+      "expected_external_dispatchable": [
+        true,
+        true
+      ],
       "expected_history_kinds": [
         "intermediate_update",
         "subagent_completion"
