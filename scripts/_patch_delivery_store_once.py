@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 PATH = Path("history_dispatcher/delivery_store.py")
+PATCH_REVISION = 2
 
 
 REPLACEMENTS = (
@@ -37,7 +38,7 @@ REPLACEMENTS = (
                     "(td.state='partial' AND (td.target_id<>'telegram' OR EXISTS ("
                     "SELECT 1 FROM recipient_deliveries rd "
                     "WHERE rd.target_delivery_id=td.id "
-                    "AND rd.state IN ('pending','failed_retryable')" 
+                    "AND rd.state IN ('pending','failed_retryable')"
                     ")))) "
                     "AND (td.next_attempt_at='' OR td.next_attempt_at<=?) "
 """,
