@@ -1,0 +1,52 @@
+name: diagnose-route-delivery
+
+on:
+  pull_request:
+    paths:
+      - "history_dispatcher/delivery_store.py"
+      - "history_dispatcher/delivery_state.py"
+      - "history_dispatcher/routing.py"
+      - "history_dispatcher/schema_v3.py"
+      - "history_dispatcher/migrations/v3.py"
+      - "history_dispatcher/delivery_migration_cli.py"
+      - "tests/test_delivery_store*.py"
+      - "tests/test_routing_v3.py"
+      - "tests/test_migration_v3.py"
+      - "tests/test_delivery_migration_cli.py"
+      - ".github/workflows/diagnose-route-delivery.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install
+        run: python -m pip install -q -e ".[dev]"
+      - name: Compact focused diagnostics
+        shell: bash
+        run: |
+          set +e
+          python -m compileall -q history_dispatcher scripts tests >diagnostic.log 2>&1
+          compile_status=$?
+          if [ "$compile_status" -eq 0 ]; then
+            python -m pytest \
+              tests/test_migration_v3.py \
+              tests/test_delivery_migration_cli.py \
+              tests/test_routing_v3.py \
+              tests/test_delivery_store.py \
+              tests/test_delivery_store_concurrency.py \
+              -q --tb=short >diagnostic.log 2>&1
+            test_status=$?
+          else
+            test_status=0
+          fi
+          tail -n 240 diagnostic.log
+          if [ "$compile_status" -ne 0 ]; then exit "$compile_status"; fi
+          exit "$test_status"
