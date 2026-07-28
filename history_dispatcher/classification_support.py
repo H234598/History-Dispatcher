@@ -10,6 +10,9 @@ from typing import Any, Mapping
 from .classification_types import CLASSIFICATION_SCHEMA_VERSION, AgentContext, HistoryKind
 
 
+_MAX_SOURCE_DEPTH = 5
+
+
 @dataclass(frozen=True)
 class _Candidate:
     text: str
@@ -84,7 +87,7 @@ def _optional_int(value: Any) -> int | None:
 
 
 def _nested_string(value: Any, key: str, *, depth: int = 0) -> str:
-    if depth > 5:
+    if depth > _MAX_SOURCE_DEPTH:
         return ""
     if isinstance(value, Mapping):
         direct = value.get(key)
@@ -102,7 +105,15 @@ def _nested_string(value: Any, key: str, *, depth: int = 0) -> str:
     return ""
 
 
-def _source_is_subagent(source: Any, thread_source: str, parent_thread_id: str) -> bool:
+def _source_is_subagent(
+    source: Any,
+    thread_source: str,
+    parent_thread_id: str,
+    *,
+    depth: int = 0,
+) -> bool:
+    if depth > _MAX_SOURCE_DEPTH:
+        return False
     if parent_thread_id or thread_source.lower() == "subagent":
         return True
     if isinstance(source, str):
@@ -112,34 +123,58 @@ def _source_is_subagent(source: Any, thread_source: str, parent_thread_id: str) 
         keys = {str(key).lower() for key in source}
         if "subagent" in keys or "thread_spawn" in keys:
             return True
-        return any(_source_is_subagent(value, "", "") for value in source.values())
+        return any(
+            _source_is_subagent(value, "", "", depth=depth + 1)
+            for value in source.values()
+        )
     if isinstance(source, list):
-        return any(_source_is_subagent(value, "", "") for value in source[:32])
+        return any(
+            _source_is_subagent(value, "", "", depth=depth + 1)
+            for value in source[:32]
+        )
     return False
 
 
-def _source_is_internal(source: Any) -> bool:
+def _source_is_internal(source: Any, *, depth: int = 0) -> bool:
+    if depth > _MAX_SOURCE_DEPTH:
+        # Over-deep untrusted metadata must never fall back to a routable root.
+        return True
     if isinstance(source, str):
         normalized = source.lower()
         return normalized == "internal" or normalized.startswith("internal_")
     if isinstance(source, Mapping):
         if "internal" in {str(key).lower() for key in source}:
             return True
-        return any(_source_is_internal(value) for value in source.values())
+        return any(
+            _source_is_internal(value, depth=depth + 1)
+            for value in source.values()
+        )
     if isinstance(source, list):
-        return any(_source_is_internal(value) for value in source[:32])
+        return any(
+            _source_is_internal(value, depth=depth + 1)
+            for value in source[:32]
+        )
     return False
 
 
-def _source_is_explicitly_unknown(source: Any) -> bool:
+def _source_is_explicitly_unknown(source: Any, *, depth: int = 0) -> bool:
+    if depth > _MAX_SOURCE_DEPTH:
+        # Treat unbounded source metadata as unknown rather than externally safe.
+        return True
     if isinstance(source, str):
         return source.strip().lower() == "unknown"
     if isinstance(source, Mapping):
         if "unknown" in {str(key).lower() for key in source}:
             return True
-        return any(_source_is_explicitly_unknown(value) for value in source.values())
+        return any(
+            _source_is_explicitly_unknown(value, depth=depth + 1)
+            for value in source.values()
+        )
     if isinstance(source, list):
-        return any(_source_is_explicitly_unknown(value) for value in source[:32])
+        return any(
+            _source_is_explicitly_unknown(value, depth=depth + 1)
+            for value in source[:32]
+        )
     return False
 
 
@@ -184,8 +219,8 @@ def _candidate_key(turn_id: str) -> str:
 
 
 def _pick_candidate(state: _SessionState, turn_id: str) -> _Candidate | None:
-    if turn_id and turn_id in state.final_candidates:
-        return state.final_candidates[turn_id]
+    if turn_id:
+        return state.final_candidates.get(turn_id)
     unbound = state.final_candidates.get("__unbound__")
     if unbound is not None:
         return unbound

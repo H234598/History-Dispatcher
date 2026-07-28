@@ -28,6 +28,10 @@ from .redaction import project_identity, redact_text, visible_output_text
 
 
 class ClassificationHandlersMixin:
+    max_visible_text_chars: int
+    max_visible_text_bytes: int
+    _build_event: Any
+
     def _consume_session_meta(self, state: _SessionState, payload: Mapping[str, Any]) -> None:
         next_session_id = _normalized_string(
             payload.get("session_id") or payload.get("id"), limit=256
@@ -172,8 +176,6 @@ class ClassificationHandlersMixin:
                 state.current_turn_id = turn_id
             return [], True, issues
         if event_type == "agent_message":
-            if self._is_inherited_subagent_record(state, ordinal):
-                return [], True, issues
             text = redact_text(
                 payload.get("message"),
                 max_chars=self.max_visible_text_chars,
@@ -223,7 +225,43 @@ class ClassificationHandlersMixin:
             max_chars=self.max_visible_text_chars,
             max_bytes=self.max_visible_text_bytes,
         )
-        text = completion_text or (candidate.text if candidate else "")
+        # A response_item candidate has already passed the visible Assistant-
+        # output filter and is therefore authoritative for displayed text.
+        text = candidate.text if candidate is not None else completion_text
+        completion_turn = turn_id or (candidate.turn_id if candidate else "")
+        response_identity = (
+            f"completion:{completion_turn}"
+            if completion_turn
+            else f"completion:{ordinal if ordinal is not None else line_number}"
+        )
+
+        if candidate and completion_text and candidate.text != completion_text:
+            issues.append(
+                ClassificationIssue(
+                    line_number,
+                    "completion_text_mismatch",
+                    "Turn-Abschluss und letzte sichtbare Assistant-Antwort unterscheiden sich",
+                    ordinal,
+                )
+            )
+            state.final_candidates.pop(_candidate_key(candidate.turn_id), None)
+            state.current_turn_id = ""
+            return [
+                self._build_event(
+                    state=state,
+                    kind=HistoryKind.UNKNOWN,
+                    confidence=ClassificationConfidence.AMBIGUOUS,
+                    reason_code="completion_text_mismatch",
+                    source_family=CURRENT_SOURCE_FAMILY,
+                    timestamp=timestamp or candidate.timestamp,
+                    turn_id=completion_turn,
+                    ordinal=ordinal,
+                    response_identity=response_identity,
+                    text=candidate.text,
+                    external_dispatchable=False,
+                )
+            ], False, issues
+
         if not text:
             return [
                 self._build_event(
@@ -235,21 +273,12 @@ class ClassificationHandlersMixin:
                     timestamp=timestamp,
                     turn_id=turn_id,
                     ordinal=ordinal,
-                    response_identity=f"completion:{ordinal if ordinal is not None else line_number}",
+                    response_identity=response_identity,
                     text="",
                     external_dispatchable=False,
                 )
             ], False, issues
 
-        if candidate and completion_text and candidate.text != completion_text:
-            issues.append(
-                ClassificationIssue(
-                    line_number,
-                    "completion_text_mismatch",
-                    "Turn-Abschluss und letzte sichtbare Assistant-Antwort unterscheiden sich",
-                    ordinal,
-                )
-            )
         kind = (
             HistoryKind.SUBAGENT_COMPLETION
             if state.agent_context is AgentContext.SUBAGENT
@@ -264,12 +293,6 @@ class ClassificationHandlersMixin:
             else ClassificationConfidence.COMPATIBLE
             if kind is not HistoryKind.UNKNOWN
             else ClassificationConfidence.AMBIGUOUS
-        )
-        completion_turn = turn_id or (candidate.turn_id if candidate else "")
-        response_identity = (
-            f"completion:{completion_turn}"
-            if completion_turn
-            else f"completion:{ordinal if ordinal is not None else line_number}"
         )
         if candidate is not None:
             state.final_candidates.pop(_candidate_key(candidate.turn_id), None)

@@ -126,7 +126,7 @@ class CodexRolloutClassifier(ClassificationHandlersMixin):
                     continue
             try:
                 record = _strict_json_loads(text_line)
-            except (json.JSONDecodeError, ValueError):
+            except (ValueError, RecursionError):
                 add_issue(
                     ClassificationIssue(
                         line_number,
@@ -160,8 +160,19 @@ class CodexRolloutClassifier(ClassificationHandlersMixin):
                 continue
 
             if top_type == "session_meta":
-                self._consume_session_meta(state, payload)
-                records_ignored += 1
+                try:
+                    self._consume_session_meta(state, payload)
+                except RecursionError:
+                    add_issue(
+                        ClassificationIssue(
+                            line_number,
+                            "invalid_json",
+                            "Rollout-Metadaten überschreiten die Rekursionstiefe",
+                            ordinal,
+                        )
+                    )
+                else:
+                    records_ignored += 1
                 continue
             if top_type == "turn_context":
                 if not self._is_inherited_subagent_record(state, ordinal):
@@ -241,7 +252,15 @@ class CodexRolloutClassifier(ClassificationHandlersMixin):
             )
 
         if source_quiescent:
-            for candidate in tuple(state.final_candidates.values()):
+            candidates = sorted(
+                state.final_candidates.values(),
+                key=lambda candidate: (
+                    candidate.ordinal is None,
+                    candidate.ordinal if candidate.ordinal is not None else 0,
+                    candidate.turn_id,
+                ),
+            )
+            for candidate in candidates:
                 kind = (
                     HistoryKind.SUBAGENT_COMPLETION
                     if state.agent_context is AgentContext.SUBAGENT
