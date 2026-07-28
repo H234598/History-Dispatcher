@@ -114,10 +114,10 @@ def _foreign_key_violations(db: sqlite3.Connection) -> tuple[str, ...]:
 
 def _assert_no_symlink_chain(path: Path, *, allow_missing_leaf: bool = False) -> None:
     current = path.expanduser().absolute()
-    if allow_missing_leaf and not current.exists():
+    if allow_missing_leaf and not current.exists() and not current.is_symlink():
         current = current.parent
     while True:
-        if current.exists() and current.is_symlink():
+        if current.is_symlink():
             raise MigrationV2Error(
                 f"symlink path component is not allowed: {current}"
             )
@@ -295,8 +295,6 @@ class DatabaseV2Migrator:
     def preflight(self) -> PreflightReport:
         info = _assert_regular_owned_database(self.database_path)
         _assert_no_symlink_chain(self.database_path.parent)
-        # This validates key availability and shape. Before any write, the
-        # mapping pass below additionally decrypts and hash-checks every row.
         self.key_provider.get_key()
         disk = shutil.disk_usage(self.database_path.parent)
         required_free = max(self.minimum_free_bytes, int(info.st_size) * 2)
@@ -377,8 +375,6 @@ class DatabaseV2Migrator:
                 "active v1 dispatch claims must expire or be released"
             )
 
-        # Validate the actual key and every encrypted payload before creating a
-        # backup directory or writing any migration artifact.
         planned_mapping = self._plan_mapping_counts()
         if dry_run:
             return MigrationV2Report(
@@ -805,12 +801,20 @@ class DatabaseV2Migrator:
         for target_id, rows in sorted(grouped.items()):
             normalized = normalized_groups[target_id]
             statuses = {entry["status"] for entry in normalized}
+            possible_duplicate = any(
+                bool(entry["possible_duplicate"]) for entry in normalized
+            )
             successes = sum(
                 1
                 for entry in normalized
                 if entry["status"] in _SUCCESS_RECIPIENT_STATES
+                and not entry["possible_duplicate"]
             )
-            if successes == len(normalized):
+            if possible_duplicate:
+                target_state = "legacy_hold"
+                legacy_outcome = "possible_duplicate"
+                terminal_at = ""
+            elif successes == len(normalized):
                 target_state = "delivered"
                 legacy_outcome = "delivered"
                 terminal_at = str(history_row["updated_at"] or created)
@@ -857,7 +861,14 @@ class DatabaseV2Migrator:
             target_count += 1
             for row, normalized_recipient in zip(rows, normalized, strict=True):
                 raw_status = normalized_recipient["status"]
-                if raw_status in _SUCCESS_RECIPIENT_STATES:
+                is_possible_duplicate = bool(
+                    normalized_recipient["possible_duplicate"]
+                )
+                if is_possible_duplicate:
+                    recipient_state = "possible_duplicate"
+                    recipient_terminal = ""
+                    error_class = "possible_duplicate"
+                elif raw_status in _SUCCESS_RECIPIENT_STATES:
                     recipient_state = raw_status
                     recipient_terminal = str(row["updated_at"] or created)
                     error_class = ""
@@ -905,7 +916,7 @@ class DatabaseV2Migrator:
                         message_ref_key,
                         recipient_idempotency_key,
                         int(history_row["attempt_count"] or 0),
-                        int(bool(row["possible_duplicate"])),
+                        int(is_possible_duplicate),
                         error_class,
                         created,
                         str(row["updated_at"] or created),
@@ -1036,8 +1047,8 @@ def verify_database_v2(database_path: Path) -> dict[str, Any]:
         and not missing
         and quick == "ok"
         and not foreign_keys
-        and migrated_legacy_events == history_items
-        and history_events >= history_items
+        and migrated_legacy_events >= history_items
+        and history_events >= migrated_legacy_events
         and unsafe_targets == 0
     )
     return {
@@ -1065,10 +1076,8 @@ def restore_database_backup(
 ) -> dict[str, Any]:
     backup = Path(backup_path).expanduser().absolute()
     destination = Path(destination_path).expanduser().absolute()
-    _assert_no_symlink_chain(backup)
+    _assert_regular_owned_database(backup)
     _assert_no_symlink_chain(destination, allow_missing_leaf=True)
-    if not backup.is_file() or backup.is_symlink():
-        raise MigrationV2Error("backup must be a regular non-symlink file")
     actual_hash = _sha256_file(backup)
     normalized_expected = str(expected_sha256).strip().lower()
     if actual_hash != normalized_expected:
