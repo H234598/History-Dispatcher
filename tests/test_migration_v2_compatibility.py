@@ -58,12 +58,15 @@ def test_v1_retention_can_prune_legacy_rows_without_deleting_v2_copy(
 
     result = store.prune(completed_days=1, audit_days=1)
 
-    assert result["history_items"] == 1
-    assert result["recipient_results"] == 1
+    assert result["history_deleted"] == 1
     with sqlite3.connect(store.database_path) as db:
         db.row_factory = sqlite3.Row
         assert db.execute(
             "SELECT COUNT(*) FROM history_items WHERE id='legacy-prunable'"
+        ).fetchone()[0] == 0
+        assert db.execute(
+            "SELECT COUNT(*) FROM recipient_results "
+            "WHERE item_id='legacy-prunable'"
         ).fetchone()[0] == 0
         event = db.execute(
             "SELECT encrypted_payload,legacy_item_id FROM history_events "
