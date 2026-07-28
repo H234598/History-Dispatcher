@@ -192,8 +192,10 @@ class DeliveryStore:
 
     @staticmethod
     def _normalize_recipient_ref(value: Any) -> str:
+        if not isinstance(value, str):
+            raise DeliveryStoreError("recipient_ref must be a string")
         return TelegramRecipientOutcome(
-            recipient_ref=str(value),
+            recipient_ref=value,
             status="failed",
         ).recipient_ref
 
@@ -239,7 +241,7 @@ class DeliveryStore:
                     "project_id,project_label,encrypted_payload,payload_hash,"
                     "operational_state,legacy_status,legacy_hold,created_at,collected_at,"
                     "terminal_at"
-                    ") VALUES (?,NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ready','',0,?,?, '')",
+                    ") VALUES (?,NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ready','',0,?,?,'')",
                     (
                         event.event_id,
                         event.source_schema_family,
@@ -549,7 +551,12 @@ class DeliveryStore:
                     "ON b.target_delivery_id=td.id "
                     "WHERE td.target_id=? AND b.provider_id=? "
                     "AND rp.plan_state='active' AND he.legacy_hold=0 "
-                    "AND td.state IN ('pending','failed_retryable','partial') "
+                    "AND (td.state IN ('pending','failed_retryable') OR "
+                    "(td.state='partial' AND (td.target_id<>'telegram' OR EXISTS ("
+                    "SELECT 1 FROM recipient_deliveries rd "
+                    "WHERE rd.target_delivery_id=td.id "
+                    "AND rd.state IN ('pending','failed_retryable')"
+                    ")))) "
                     "AND (td.next_attempt_at='' OR td.next_attempt_at<=?) "
                     "ORDER BY td.created_at,td.id LIMIT ?",
                     (target_id, provider_id, now, safe_limit),
@@ -688,7 +695,7 @@ class DeliveryStore:
         open_refs = tuple(
             str(row["recipient_ref"])
             for row in rows
-            if str(row["state"]) not in _TERMINAL_RECIPIENT_STATES
+            if str(row["state"]) in {"pending", "claimed", "failed_retryable"}
         )
         return successful, open_refs
 
@@ -979,17 +986,22 @@ class DeliveryStore:
                         raise DeliveryStoreError("unsupported target completion state")
                 attempt_no = int(target["attempt_count"])
                 if (
-                    state is TargetDeliveryState.FAILED_RETRYABLE
+                    state
+                    in {
+                        TargetDeliveryState.FAILED_RETRYABLE,
+                        TargetDeliveryState.PARTIAL,
+                    }
                     and attempt_no >= max(1, int(max_attempts))
                 ):
                     state = TargetDeliveryState.QUARANTINED
                     error_class = error_class or "max_attempts_exceeded"
                 next_attempt_at = ""
+                retry_delay = 0
                 if state in {
                     TargetDeliveryState.FAILED_RETRYABLE,
                     TargetDeliveryState.PARTIAL,
                 }:
-                    delay = max(
+                    retry_delay = max(
                         int(retry_after_seconds),
                         self.compute_backoff_seconds(
                             target_delivery_id,
@@ -1000,7 +1012,7 @@ class DeliveryStore:
                         ),
                     )
                     next_attempt_at = self._format_time(
-                        now_dt + timedelta(seconds=delay)
+                        now_dt + timedelta(seconds=retry_delay)
                     )
                 terminal_at = now if target_state_is_terminal(state) else ""
                 skip_reason = (
@@ -1041,7 +1053,7 @@ class DeliveryStore:
                         now,
                         state.value,
                         error_class,
-                        max(0, int(retry_after_seconds)),
+                        retry_delay,
                         target_delivery_id,
                         attempt_no,
                     ),
