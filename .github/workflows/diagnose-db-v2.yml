@@ -1,0 +1,39 @@
+name: diagnose-db-v2
+
+on:
+  pull_request:
+    paths:
+      - "history_dispatcher/migrations/**"
+      - "history_dispatcher/schema_v2.py"
+      - "history_dispatcher/delivery_state.py"
+      - "history_dispatcher/identifiers.py"
+      - "tests/test_migration_v2.py"
+      - "tests/test_delivery_state.py"
+      - "tests/test_identifiers.py"
+      - ".github/workflows/diagnose-db-v2.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Run compact DB-v2 diagnostics
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          git clone --quiet --depth 1 --branch "$HEAD_BRANCH" \
+            "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY}.git" source
+          cd source
+          PYTHON="$(find /opt/hostedtoolcache/Python/3.13* -path '*/bin/python' -type f | head -n 1)"
+          test -n "$PYTHON"
+          "$PYTHON" -m pip install -q -e ".[dev]"
+          "$PYTHON" -m pytest \
+            tests/test_identifiers.py \
+            tests/test_delivery_state.py \
+            tests/test_migration_v2.py \
+            -q --tb=short
