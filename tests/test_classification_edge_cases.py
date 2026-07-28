@@ -72,7 +72,14 @@ def test_subagent_inherited_completion_before_history_boundary_is_ignored() -> N
                     "id": "thread-child-boundary",
                     "parent_thread_id": "thread-parent-boundary",
                     "cwd": "/workspace/boundary",
-                    "source": {"subagent": {"thread_spawn": {"parent_thread_id": "thread-parent-boundary", "depth": 1}}},
+                    "source": {
+                        "subagent": {
+                            "thread_spawn": {
+                                "parent_thread_id": "thread-parent-boundary",
+                                "depth": 1,
+                            }
+                        }
+                    },
                     "thread_source": "subagent",
                     "subagent_history_start_ordinal": 5,
                 },
@@ -348,4 +355,117 @@ def test_explicit_unknown_session_source_is_fail_closed() -> None:
     report = CodexRolloutClassifier().classify_lines(lines)
 
     assert report.events[0].history_kind is HistoryKind.UNKNOWN
+    assert report.events[0].external_dispatchable is False
+
+
+def test_oversized_invalid_utf8_line_is_rejected_before_decode() -> None:
+    report = CodexRolloutClassifier(max_jsonl_line_bytes=256).classify_lines(
+        [b"\xff" * 257]
+    )
+
+    assert [issue.code for issue in report.issues] == ["line_too_large"]
+    assert report.records_seen == 1
+
+
+def test_issue_collection_is_bounded_and_reports_overflow() -> None:
+    report = CodexRolloutClassifier(max_issues=2).classify_lines(
+        ['{"type":'] * 5
+    )
+
+    assert [issue.code for issue in report.issues] == [
+        "invalid_json",
+        "invalid_json",
+        "issues_truncated",
+    ]
+    assert report.issues[-1].line_number == 0
+    assert report.issues[-1].message.startswith("3 weitere")
+
+
+def test_commentary_without_turn_context_is_not_external_dispatchable() -> None:
+    lines = [
+        json.dumps(
+            {
+                "timestamp": "2026-07-28T23:00:00Z",
+                "ordinal": 0,
+                "type": "session_meta",
+                "payload": {
+                    "session_id": "session-no-turn-commentary",
+                    "id": "thread-no-turn-commentary",
+                    "cwd": "fixture-projects/no-turn-commentary",
+                    "source": "cli",
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "timestamp": "2026-07-28T23:00:01Z",
+                "ordinal": 1,
+                "type": "response_item",
+                "payload": {
+                    "id": "response-no-turn-commentary",
+                    "type": "message",
+                    "role": "assistant",
+                    "phase": "commentary",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Visible commentary without a turn",
+                        }
+                    ],
+                },
+            }
+        ),
+    ]
+
+    report = CodexRolloutClassifier().classify_lines(lines)
+
+    assert report.events[0].history_kind is HistoryKind.INTERMEDIATE_UPDATE
+    assert report.events[0].turn_key == "turn_unknown"
+    assert report.events[0].external_dispatchable is False
+
+
+def test_quiescent_completion_without_turn_context_is_not_external_dispatchable() -> None:
+    lines = [
+        json.dumps(
+            {
+                "timestamp": "2026-07-28T23:10:00Z",
+                "ordinal": 0,
+                "type": "session_meta",
+                "payload": {
+                    "session_id": "session-no-turn-final",
+                    "id": "thread-no-turn-final",
+                    "cwd": "fixture-projects/no-turn-final",
+                    "source": "cli",
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "timestamp": "2026-07-28T23:10:01Z",
+                "ordinal": 1,
+                "type": "response_item",
+                "payload": {
+                    "id": "response-no-turn-final",
+                    "type": "message",
+                    "role": "assistant",
+                    "phase": "final_answer",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Visible final answer without a turn",
+                        }
+                    ],
+                },
+            }
+        ),
+    ]
+
+    report = CodexRolloutClassifier().classify_lines(
+        lines,
+        source_quiescent=True,
+    )
+
+    assert report.events[0].history_kind is HistoryKind.TASK_COMPLETION
+    assert report.events[0].confidence is ClassificationConfidence.COMPATIBLE
+    assert report.events[0].turn_key == "turn_unknown"
     assert report.events[0].external_dispatchable is False

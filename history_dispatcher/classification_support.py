@@ -143,11 +143,16 @@ def _source_is_explicitly_unknown(source: Any) -> bool:
     return False
 
 
-def _can_dispatch(state: _SessionState, kind: HistoryKind) -> bool:
+def _can_dispatch(
+    state: _SessionState,
+    kind: HistoryKind,
+    turn_id: str,
+) -> bool:
     return (
         kind is not HistoryKind.UNKNOWN
         and state.agent_context is not AgentContext.UNKNOWN
         and bool(state.effective_session_id)
+        and bool(str(turn_id or "").strip())
         and state.project_id != "proj_unknown"
     )
 

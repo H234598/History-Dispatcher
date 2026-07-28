@@ -42,10 +42,18 @@ class CodexRolloutClassifier(ClassificationHandlersMixin):
         *,
         max_jsonl_line_bytes: int = DEFAULT_MAX_JSONL_LINE_BYTES,
         max_visible_text_bytes: int = MAX_VISIBLE_TEXT_BYTES,
+        max_issues: int = 256,
     ) -> None:
         self.max_jsonl_line_bytes = max(256, int(max_jsonl_line_bytes))
-        self.max_visible_text_bytes = max(128, min(int(max_visible_text_bytes), MAX_VISIBLE_TEXT_BYTES))
-        self.max_visible_text_chars = min(self.max_visible_text_bytes, MAX_VISIBLE_TEXT_CHARS)
+        self.max_visible_text_bytes = max(
+            128,
+            min(int(max_visible_text_bytes), MAX_VISIBLE_TEXT_BYTES),
+        )
+        self.max_visible_text_chars = min(
+            self.max_visible_text_bytes,
+            MAX_VISIBLE_TEXT_CHARS,
+        )
+        self.max_issues = max(1, min(int(max_issues), 4096))
 
     def classify_lines(
         self,
@@ -60,6 +68,14 @@ class CodexRolloutClassifier(ClassificationHandlersMixin):
         records_seen = 0
         records_ignored = 0
         unknown_records = 0
+        issue_overflow = 0
+
+        def add_issue(issue: ClassificationIssue) -> None:
+            nonlocal issue_overflow
+            if len(issues) < self.max_issues:
+                issues.append(issue)
+            else:
+                issue_overflow += 1
 
         def add_event(event: ClassifiedEvent) -> None:
             if event.dedupe_key in seen_dedupe:
@@ -70,38 +86,62 @@ class CodexRolloutClassifier(ClassificationHandlersMixin):
         for line_number, raw_line in enumerate(lines, start=1):
             if isinstance(raw_line, bytes):
                 raw_bytes = raw_line
+                if not raw_bytes.strip():
+                    continue
+                records_seen += 1
+                if len(raw_bytes) > self.max_jsonl_line_bytes:
+                    add_issue(
+                        ClassificationIssue(
+                            line_number,
+                            "line_too_large",
+                            f"JSONL-Zeile überschreitet {self.max_jsonl_line_bytes} Byte",
+                        )
+                    )
+                    continue
                 try:
                     text_line = raw_line.decode("utf-8")
                 except UnicodeDecodeError:
-                    issues.append(
-                        ClassificationIssue(line_number, "invalid_utf8", "JSONL-Zeile ist nicht UTF-8")
+                    add_issue(
+                        ClassificationIssue(
+                            line_number,
+                            "invalid_utf8",
+                            "JSONL-Zeile ist nicht UTF-8",
+                        )
                     )
                     continue
             else:
                 text_line = str(raw_line)
+                if not text_line.strip():
+                    continue
+                records_seen += 1
                 raw_bytes = text_line.encode("utf-8")
-            if not text_line.strip():
-                continue
-            records_seen += 1
-            if len(raw_bytes) > self.max_jsonl_line_bytes:
-                issues.append(
-                    ClassificationIssue(
-                        line_number,
-                        "line_too_large",
-                        f"JSONL-Zeile überschreitet {self.max_jsonl_line_bytes} Byte",
+                if len(raw_bytes) > self.max_jsonl_line_bytes:
+                    add_issue(
+                        ClassificationIssue(
+                            line_number,
+                            "line_too_large",
+                            f"JSONL-Zeile überschreitet {self.max_jsonl_line_bytes} Byte",
+                        )
                     )
-                )
-                continue
+                    continue
             try:
                 record = _strict_json_loads(text_line)
             except (json.JSONDecodeError, ValueError):
-                issues.append(
-                    ClassificationIssue(line_number, "invalid_json", "JSONL-Zeile ist kein eindeutiges gültiges JSON")
+                add_issue(
+                    ClassificationIssue(
+                        line_number,
+                        "invalid_json",
+                        "JSONL-Zeile ist kein eindeutiges gültiges JSON",
+                    )
                 )
                 continue
             if not isinstance(record, dict):
-                issues.append(
-                    ClassificationIssue(line_number, "record_not_object", "Rollout-Datensatz muss ein Objekt sein")
+                add_issue(
+                    ClassificationIssue(
+                        line_number,
+                        "record_not_object",
+                        "Rollout-Datensatz muss ein Objekt sein",
+                    )
                 )
                 continue
             top_type = _normalized_string(record.get("type"), limit=96).lower()
@@ -109,7 +149,7 @@ class CodexRolloutClassifier(ClassificationHandlersMixin):
             ordinal = _optional_int(record.get("ordinal"))
             timestamp = _normalized_string(record.get("timestamp"), limit=64)
             if not top_type or not isinstance(payload, dict):
-                issues.append(
+                add_issue(
                     ClassificationIssue(
                         line_number,
                         "invalid_rollout_envelope",
@@ -138,7 +178,8 @@ class CodexRolloutClassifier(ClassificationHandlersMixin):
                     ordinal=ordinal,
                     line_number=line_number,
                 )
-                issues.extend(response_issues)
+                for issue in response_issues:
+                    add_issue(issue)
                 for event in emitted:
                     add_event(event)
                 records_ignored += int(ignored)
@@ -151,7 +192,8 @@ class CodexRolloutClassifier(ClassificationHandlersMixin):
                     ordinal=ordinal,
                     line_number=line_number,
                 )
-                issues.extend(event_issues)
+                for issue in event_issues:
+                    add_issue(issue)
                 for event in emitted:
                     add_event(event)
                 records_ignored += int(ignored)
@@ -170,6 +212,15 @@ class CodexRolloutClassifier(ClassificationHandlersMixin):
                 continue
 
             unknown_records += 1
+            payload_identity = hashlib.sha256(
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+            ).hexdigest()[:16]
             add_event(
                 self._build_event(
                     state=state,
@@ -182,7 +233,7 @@ class CodexRolloutClassifier(ClassificationHandlersMixin):
                     ordinal=ordinal,
                     response_identity=(
                         f"unknown:{top_type}:"
-                        f"{ordinal if ordinal is not None else hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str).encode('utf-8')).hexdigest()[:16]}"
+                        f"{ordinal if ordinal is not None else payload_identity}"
                     ),
                     text="",
                     external_dispatchable=False,
@@ -212,11 +263,30 @@ class CodexRolloutClassifier(ClassificationHandlersMixin):
                         timestamp=candidate.timestamp,
                         turn_id=candidate.turn_id,
                         ordinal=candidate.ordinal,
-                        response_identity=candidate.response_id or str(candidate.ordinal or "quiescent"),
+                        response_identity=(
+                            candidate.response_id
+                            or str(candidate.ordinal or "quiescent")
+                        ),
                         text=candidate.text,
-                        external_dispatchable=_can_dispatch(state, kind),
+                        external_dispatchable=_can_dispatch(
+                            state,
+                            kind,
+                            candidate.turn_id,
+                        ),
                     )
                 )
+
+        if issue_overflow:
+            issues.append(
+                ClassificationIssue(
+                    0,
+                    "issues_truncated",
+                    (
+                        f"{issue_overflow} weitere Klassifikationsprobleme "
+                        "wurden nicht einzeln gespeichert"
+                    ),
+                )
+            )
 
         return ClassificationReport(
             events=tuple(events),
@@ -268,7 +338,10 @@ class CodexRolloutClassifier(ClassificationHandlersMixin):
             timestamp=timestamp,
             turn_id=turn_id,
             ordinal=ordinal,
-            response_identity=f"legacy:{ordinal if ordinal is not None else hashlib.sha256(text.encode()).hexdigest()[:12]}",
+            response_identity=(
+                f"legacy:"
+                f"{ordinal if ordinal is not None else hashlib.sha256(text.encode()).hexdigest()[:12]}"
+            ),
             text=text,
             external_dispatchable=False,
         )

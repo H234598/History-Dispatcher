@@ -112,7 +112,11 @@ class ClassificationHandlersMixin:
                     ordinal=ordinal,
                     response_identity=response_id,
                     text=text,
-                    external_dispatchable=_can_dispatch(state, HistoryKind.INTERMEDIATE_UPDATE),
+                    external_dispatchable=_can_dispatch(
+                        state,
+                        HistoryKind.INTERMEDIATE_UPDATE,
+                        turn_id,
+                    ),
                 )
             ], False, issues
         if phase in {"final_answer", ""}:
@@ -192,7 +196,11 @@ class ClassificationHandlersMixin:
                         ordinal=ordinal,
                         response_identity=f"event:{ordinal if ordinal is not None else line_number}",
                         text=text,
-                        external_dispatchable=_can_dispatch(state, HistoryKind.INTERMEDIATE_UPDATE),
+                        external_dispatchable=_can_dispatch(
+                            state,
+                            HistoryKind.INTERMEDIATE_UPDATE,
+                            turn_id,
+                        ),
                     )
                 ], False, issues
             if phase in {"final_answer", ""}:
@@ -280,10 +288,10 @@ class ClassificationHandlersMixin:
                 ),
                 source_family=CURRENT_SOURCE_FAMILY,
                 timestamp=timestamp or (candidate.timestamp if candidate else ""),
-                turn_id=turn_id or (candidate.turn_id if candidate else ""),
+                turn_id=completion_turn,
                 ordinal=ordinal,
                 response_identity=response_identity,
                 text=text,
-                external_dispatchable=_can_dispatch(state, kind),
+                external_dispatchable=_can_dispatch(state, kind, completion_turn),
             )
         ], False, issues
