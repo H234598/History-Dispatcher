@@ -194,10 +194,23 @@ def target_state_is_terminal(value: TargetDeliveryState | str) -> bool:
     }
 
 
-def recipient_state_is_terminal(value: RecipientDeliveryState | str) -> bool:
-    state = RecipientDeliveryState(value)
-    return state in {
+def recipient_state_is_successful(value: RecipientDeliveryState | str) -> bool:
+    return RecipientDeliveryState(value) in {
+        RecipientDeliveryState.ACCEPTED,
+        RecipientDeliveryState.DELIVERED,
         RecipientDeliveryState.ACKNOWLEDGED,
+    }
+
+
+def recipient_state_is_terminal(value: RecipientDeliveryState | str) -> bool:
+    """Return whether the recipient must be excluded from automatic retries.
+
+    Accepted and delivered outcomes may still advance monotonically when a later
+    receipt arrives, but they are already terminal for resend decisions.
+    """
+
+    state = RecipientDeliveryState(value)
+    return recipient_state_is_successful(state) or state in {
         RecipientDeliveryState.FAILED_TERMINAL,
         RecipientDeliveryState.QUARANTINED,
         RecipientDeliveryState.SKIPPED,
