@@ -17,6 +17,8 @@ applet expansion are documented in:
 - [`docs/adr/`](docs/adr/) — ADR-001 through ADR-016;
 - [`docs/history-classification.md`](docs/history-classification.md) — the pure,
   versioned Codex rollout classifier, redaction and fixture contract;
+- [`docs/migration-v2.md`](docs/migration-v2.md) — the explicit, additive,
+  backup- and restore-tested database-v2 migration contract;
 - [`docs/implementation-progress.md`](docs/implementation-progress.md) — the
   sequential implementation status;
 - [`docs/reuse-ledger.md`](docs/reuse-ledger.md) — source, licence and parity
@@ -94,6 +96,18 @@ For a legacy JSONL export, use `history-dispatcher migrate-legacy --dry-run`
 first. TeeBotus also exposes `migrate_codex_history_to_dispatcher`, which
 streams decrypted AccountStore records directly over the Unix socket and never
 creates a plaintext staging file.
+
+The additive database-v2 migration is deliberately separate from normal
+startup and defaults to a write-free dry run:
+
+    python scripts/migrate_database_v2.py preflight
+    python scripts/migrate_database_v2.py migrate
+
+A real write additionally requires `--apply --confirm MIGRATE-V2`. It creates
+and verifies an owner-only SQLite backup before the single migration
+transaction. The migration does not activate the new classifier, router or any
+new external delivery. See [`docs/migration-v2.md`](docs/migration-v2.md) for
+preflight, verification and hash-bound restore steps.
 
 ## Isolated Cinnamon verification
 
