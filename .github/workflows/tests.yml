@@ -21,6 +21,7 @@ jobs:
         run: |
           python -m py_compile history_dispatcher/*.py scripts/*.py
           node --check files/history-dispatcher@H234598/applet.js
+          node --test tests/applet_contract.test.js
           python -m pytest -q
       - name: Build distributions
         run: python -m build
