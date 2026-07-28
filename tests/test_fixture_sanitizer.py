@@ -9,6 +9,10 @@ from pathlib import Path
 
 import pytest
 
+from history_dispatcher.classification import (
+    CLASSIFICATION_SCHEMA_VERSION,
+    CodexRolloutClassifier,
+)
 from history_dispatcher.fixture_sanitizer import (
     SANITIZER_SCHEMA_VERSION,
     sanitize_jsonl_bytes,
@@ -75,6 +79,7 @@ def test_sanitizer_is_deterministic_and_preserves_protocol_shape() -> None:
     assert first.source_sha256 == hashlib.sha256(source).hexdigest()
     assert first.output_sha256 == hashlib.sha256(first.output_bytes).hexdigest()
     assert first.line_count == 2
+    assert first.output_bytes is not None
     text = first.output_bytes.decode("utf-8")
     assert contains_sensitive_marker(text) is False
     for forbidden in (
@@ -89,6 +94,8 @@ def test_sanitizer_is_deterministic_and_preserves_protocol_shape() -> None:
         "Private answer",
         "Bernhard private internal label",
         "Private repository name",
+        "custom_private_field",
+        hashlib.sha256(b"real-session-123").hexdigest()[:20],
     ):
         assert forbidden not in text
 
@@ -101,7 +108,60 @@ def test_sanitizer_is_deterministic_and_preserves_protocol_shape() -> None:
     assert records[1]["payload"]["role"] == "assistant"
     assert records[1]["payload"]["phase"] == "final_answer"
     assert records[0]["payload"]["session_id"].startswith("session_id_")
-    assert records[1]["payload"]["content"][0]["text"].startswith("fixture text txt_")
+    assert records[1]["payload"]["content"][0]["text"].startswith(
+        "fixture text txt_"
+    )
+
+
+def test_unknown_keys_and_scalars_are_pseudonymized_per_fixture() -> None:
+    source = (
+        json.dumps(
+            {
+                "type": "event_msg",
+                "payload": {
+                    "source": "private-custom-source",
+                    "status": "internal-preview-42",
+                    "model_provider": "paid-private-provider",
+                    "customer secret key": "private-customer",
+                    "customer_id": 12345,
+                    "is_confidential": True,
+                    "first_unknown": "same-low-entropy-value",
+                    "second_unknown": "same-low-entropy-value",
+                },
+            }
+        )
+        + "\n"
+    ).encode("utf-8")
+
+    result = sanitize_jsonl_bytes(source)
+    assert result.output_bytes is not None
+    text = result.output_bytes.decode("utf-8")
+    record = json.loads(text)
+    payload = record["payload"]
+
+    for forbidden in (
+        "private-custom-source",
+        "internal-preview-42",
+        "paid-private-provider",
+        "customer secret key",
+        "private-customer",
+        "customer_id",
+        "is_confidential",
+        "first_unknown",
+        "second_unknown",
+        "same-low-entropy-value",
+        "12345",
+    ):
+        assert forbidden not in text
+    assert payload["source"].startswith("value_")
+    assert payload["status"].startswith("value_")
+    assert len([key for key in payload if key.startswith("field_")]) >= 5
+    repeated = [
+        value
+        for value in payload.values()
+        if isinstance(value, str) and value.startswith("value_")
+    ]
+    assert len(repeated) > len(set(repeated))
 
 
 def test_sanitizer_rejects_invalid_json_utf8_non_objects_and_oversize() -> None:
@@ -120,7 +180,9 @@ def test_sanitizer_rejects_invalid_json_utf8_non_objects_and_oversize() -> None:
         sanitize_jsonl_bytes(b'{"type":"x","payload":{"value":NaN}}\n')
 
 
-def test_file_sanitizer_dry_run_writes_nothing_and_atomic_write_is_private(tmp_path: Path) -> None:
+def test_file_sanitizer_dry_run_writes_nothing_and_atomic_write_is_private(
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "private.jsonl"
     output = tmp_path / "not-created-during-dry-run" / "sanitized.jsonl"
     source.write_bytes(_private_source())
@@ -136,6 +198,20 @@ def test_file_sanitizer_dry_run_writes_nothing_and_atomic_write_is_private(tmp_p
     assert hashlib.sha256(output.read_bytes()).hexdigest() == written.output_sha256
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert not list(output.parent.glob("*.tmp"))
+
+
+def test_file_sanitizer_rejects_newline_free_oversize_before_full_buffer(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "oversized.jsonl"
+    output = tmp_path / "sanitized.jsonl"
+    source.write_bytes(b"x" * 257)
+
+    with pytest.raises(ValueError, match="maximum size"):
+        sanitize_jsonl_file(source, output, max_line_bytes=256)
+
+    assert output.exists() is False
+    assert not list(tmp_path.glob("*.tmp"))
 
 
 def test_manifest_contains_only_hash_reference_and_upstream_commit(tmp_path: Path) -> None:
@@ -189,6 +265,7 @@ def test_cli_dry_run_outputs_manifest_entry_without_writes(tmp_path: Path) -> No
 def test_checked_in_fixture_manifest_matches_all_jsonl_files() -> None:
     manifest = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["sanitizer_schema_version"] == SANITIZER_SCHEMA_VERSION
+    assert manifest["classification_schema_version"] == CLASSIFICATION_SCHEMA_VERSION
     assert manifest["upstream_commit"] == UPSTREAM_COMMIT
 
     expected_paths = {
@@ -202,13 +279,13 @@ def test_checked_in_fixture_manifest_matches_all_jsonl_files() -> None:
         path = FIXTURES / entry["path"]
         data = path.read_bytes()
         assert hashlib.sha256(data).hexdigest() == entry["sha256"]
-        assert len([line for line in data.splitlines() if line.strip()]) == entry["line_count"]
+        assert len([line for line in data.splitlines() if line.strip()]) == entry[
+            "line_count"
+        ]
         assert contains_sensitive_marker(data.decode("utf-8", errors="replace")) is False
 
 
 def test_checked_in_fixture_manifest_expectations_match_classifier() -> None:
-    from history_dispatcher.classification import CodexRolloutClassifier
-
     manifest = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))
     classifier = CodexRolloutClassifier(max_jsonl_line_bytes=16 * 1024)
     for entry in manifest["files"]:
@@ -216,5 +293,11 @@ def test_checked_in_fixture_manifest_expectations_match_classifier() -> None:
         report = classifier.classify_lines(data.splitlines())
         assert [event.history_kind.value for event in report.events] == entry[
             "expected_history_kinds"
+        ]
+        assert [event.confidence.value for event in report.events] == entry[
+            "expected_confidences"
+        ]
+        assert [event.external_dispatchable for event in report.events] == entry[
+            "expected_external_dispatchable"
         ]
         assert [issue.code for issue in report.issues] == entry["expected_issue_codes"]
