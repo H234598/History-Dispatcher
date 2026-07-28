@@ -13,10 +13,12 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO
+from typing import Any
 from urllib.parse import urlsplit
 
-from ..crypto import SecretServiceKeyProvider, decrypt_json
+from cryptography.exceptions import InvalidTag
+
+from ..crypto import KeyUnavailable, SecretServiceKeyProvider, decrypt_json
 from ..identifiers import persistent_opaque_id
 from ..redaction import safe_project_label
 from ..schema_v2 import (
@@ -31,6 +33,7 @@ from ..schema_v2 import (
 
 MINIMUM_FREE_BYTES = 256 * 1024 * 1024
 _SUCCESS_RECIPIENT_STATES = frozenset({"accepted", "delivered", "acknowledged"})
+_SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 
 
 class MigrationV2Error(RuntimeError):
@@ -99,22 +102,25 @@ def _schema_versions(db: sqlite3.Connection) -> tuple[int, ...]:
 
 
 def _quick_check(db: sqlite3.Connection) -> str:
-    rows = db.execute("PRAGMA quick_check").fetchall()
-    return "\n".join(str(row[0]) for row in rows)
+    return "\n".join(str(row[0]) for row in db.execute("PRAGMA quick_check"))
 
 
 def _foreign_key_violations(db: sqlite3.Connection) -> tuple[str, ...]:
-    return tuple("|".join(str(value) for value in row) for row in db.execute("PRAGMA foreign_key_check"))
+    return tuple(
+        "|".join(str(value) for value in row)
+        for row in db.execute("PRAGMA foreign_key_check")
+    )
 
 
 def _assert_no_symlink_chain(path: Path, *, allow_missing_leaf: bool = False) -> None:
-    absolute = path.expanduser().absolute()
-    current = absolute
+    current = path.expanduser().absolute()
     if allow_missing_leaf and not current.exists():
         current = current.parent
     while True:
         if current.exists() and current.is_symlink():
-            raise MigrationV2Error(f"symlink path component is not allowed: {current}")
+            raise MigrationV2Error(
+                f"symlink path component is not allowed: {current}"
+            )
         if current.parent == current:
             break
         current = current.parent
@@ -149,12 +155,12 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def _bounded_copy_hash(handle: BinaryIO, digest: hashlib._Hash) -> int:  # type: ignore[name-defined]
-    total = 0
-    for block in iter(lambda: handle.read(1024 * 1024), b""):
-        digest.update(block)
-        total += len(block)
-    return total
+def _remove_sqlite_sidecars(path: Path) -> None:
+    for suffix in _SQLITE_SIDECAR_SUFFIXES:
+        try:
+            Path(f"{path}{suffix}").unlink()
+        except FileNotFoundError:
+            pass
 
 
 @dataclass(frozen=True)
@@ -289,7 +295,8 @@ class DatabaseV2Migrator:
     def preflight(self) -> PreflightReport:
         info = _assert_regular_owned_database(self.database_path)
         _assert_no_symlink_chain(self.database_path.parent)
-        # Resolve the key before any write. There is no plaintext or random-key fallback.
+        # This validates key availability and shape. Before any write, the
+        # mapping pass below additionally decrypts and hash-checks every row.
         self.key_provider.get_key()
         disk = shutil.disk_usage(self.database_path.parent)
         required_free = max(self.minimum_free_bytes, int(info.st_size) * 2)
@@ -358,14 +365,20 @@ class DatabaseV2Migrator:
                 recipient_deliveries=verification["recipient_deliveries"],
                 mapping_counts={},
                 quick_check=verification["quick_check"],
-                foreign_key_violations=tuple(verification["foreign_key_violations"]),
+                foreign_key_violations=tuple(
+                    verification["foreign_key_violations"]
+                ),
                 no_external_dispatch_created=verification[
                     "no_external_dispatch_created"
                 ],
             )
         if preflight.active_claims:
-            raise MigrationV2Error("active v1 dispatch claims must expire or be released")
+            raise MigrationV2Error(
+                "active v1 dispatch claims must expire or be released"
+            )
 
+        # Validate the actual key and every encrypted payload before creating a
+        # backup directory or writing any migration artifact.
         planned_mapping = self._plan_mapping_counts()
         if dry_run:
             return MigrationV2Report(
@@ -400,7 +413,10 @@ class DatabaseV2Migrator:
                 self._fault("after_schema")
                 counts = self._migrate_legacy_rows(db, mapping_counts)
                 self._fault("after_rows")
-                self._verify_transaction(db, expected_history_items=preflight.history_items)
+                self._verify_transaction(
+                    db,
+                    expected_history_items=preflight.history_items,
+                )
                 report_payload = {
                     "history_events": counts.history_events,
                     "route_plans": counts.route_plans,
@@ -438,13 +454,15 @@ class DatabaseV2Migrator:
             except Exception as exc:
                 db.rollback()
                 raise MigrationV2Error(
-                    f"database v2 migration rolled back; backup {backup.name} is intact"
+                    f"database v2 migration rolled back; backup {backup.name} "
+                    "is intact"
                 ) from exc
         os.chmod(self.database_path, 0o600)
         verification = verify_database_v2(self.database_path)
         if not verification["ok"]:
             raise MigrationV2Error(
-                f"database v2 post-commit verification failed; backup {backup.name} is intact"
+                f"database v2 post-commit verification failed; backup "
+                f"{backup.name} is intact"
             )
         return MigrationV2Report(
             ok=True,
@@ -460,7 +478,9 @@ class DatabaseV2Migrator:
             recipient_deliveries=counts.recipient_deliveries,
             mapping_counts=mapping_counts,
             quick_check=verification["quick_check"],
-            foreign_key_violations=tuple(verification["foreign_key_violations"]),
+            foreign_key_violations=tuple(
+                verification["foreign_key_violations"]
+            ),
             no_external_dispatch_created=verification[
                 "no_external_dispatch_created"
             ],
@@ -471,7 +491,9 @@ class DatabaseV2Migrator:
         with _connect(self.database_path) as db:
             if not _table_exists(db, "history_items"):
                 return counts
-            for row in db.execute("SELECT * FROM history_items ORDER BY created_at, id"):
+            for row in db.execute(
+                "SELECT * FROM history_items ORDER BY created_at, id"
+            ):
                 payload = self._decode_payload(row)
                 mapping = self._map_legacy_row(row, payload)
                 counts[f"kind:{mapping.history_kind}"] += 1
@@ -486,7 +508,10 @@ class DatabaseV2Migrator:
             raise MigrationV2Error("backup directory must not be a symlink")
         os.chmod(self.backup_dir, 0o700)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        name = f"{self.database_path.stem}-v1-before-v2-{stamp}-{uuid.uuid4().hex[:8]}.sqlite3"
+        name = (
+            f"{self.database_path.stem}-v1-before-v2-{stamp}-"
+            f"{uuid.uuid4().hex[:8]}.sqlite3"
+        )
         target = self.backup_dir / name
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{name}.",
@@ -496,16 +521,24 @@ class DatabaseV2Migrator:
         os.close(descriptor)
         temporary = Path(temporary_name)
         try:
-            with _connect(self.database_path) as source, sqlite3.connect(temporary) as destination:
-                source.backup(destination)
-                destination.commit()
-                quick = _quick_check(destination)
+            with _connect(self.database_path) as source:
+                destination = sqlite3.connect(temporary)
+                try:
+                    destination.execute("PRAGMA journal_mode=DELETE")
+                    source.backup(destination)
+                    destination.commit()
+                    quick = _quick_check(destination)
+                finally:
+                    destination.close()
+            _remove_sqlite_sidecars(temporary)
             if quick != "ok":
                 raise MigrationV2Error("database backup quick_check failed")
-            with temporary.open("rb") as handle:
+            with temporary.open("rb+") as handle:
                 os.fsync(handle.fileno())
             os.chmod(temporary, 0o600)
             os.replace(temporary, target)
+            _remove_sqlite_sidecars(temporary)
+            _remove_sqlite_sidecars(target)
             _fsync_directory(self.backup_dir)
             return BackupReport(
                 name=name,
@@ -514,6 +547,7 @@ class DatabaseV2Migrator:
                 quick_check=quick,
             )
         finally:
+            _remove_sqlite_sidecars(temporary)
             try:
                 temporary.unlink()
             except FileNotFoundError:
@@ -528,8 +562,17 @@ class DatabaseV2Migrator:
                 aad=item_id.encode("utf-8"),
             )
             payload = json.loads(raw.decode("utf-8"))
-        except Exception as exc:
-            raise MigrationV2Error(f"legacy payload {item_id} cannot be verified") from exc
+        except (
+            InvalidTag,
+            KeyUnavailable,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise MigrationV2Error(
+                f"legacy payload {item_id} cannot be verified"
+            ) from exc
         if not isinstance(payload, dict):
             raise MigrationV2Error(f"legacy payload {item_id} is not an object")
         if hashlib.sha256(raw).hexdigest() != str(row["payload_hash"]):
@@ -542,7 +585,9 @@ class DatabaseV2Migrator:
         payload: Mapping[str, Any],
     ) -> _LegacyMapping:
         classification = payload.get("classification")
-        classification_map = classification if isinstance(classification, Mapping) else {}
+        classification_map = (
+            classification if isinstance(classification, Mapping) else {}
+        )
         explicit_kind = str(
             payload.get("history_kind")
             or classification_map.get("history_kind")
@@ -629,7 +674,9 @@ class DatabaseV2Migrator:
         mapping_counts: dict[str, int],
     ) -> _MigrationCounts:
         counts = _MigrationCounts()
-        rows = db.execute("SELECT * FROM history_items ORDER BY created_at, id").fetchall()
+        rows = db.execute(
+            "SELECT * FROM history_items ORDER BY created_at, id"
+        ).fetchall()
         for row in rows:
             payload = self._decode_payload(row)
             mapping = self._map_legacy_row(row, payload)
@@ -676,7 +723,8 @@ class DatabaseV2Migrator:
             mapping_counts[f"confidence:{mapping.confidence}"] += 1
             mapping_counts[f"legacy_status:{str(row['status'])}"] += 1
             recipient_rows = db.execute(
-                "SELECT * FROM recipient_results WHERE item_id=? ORDER BY recipient_id",
+                "SELECT * FROM recipient_results WHERE item_id=? "
+                "ORDER BY recipient_id",
                 (str(row["id"]),),
             ).fetchall()
             if recipient_rows:
@@ -732,10 +780,7 @@ class DatabaseV2Migrator:
                 )
             normalized_groups[target_id] = rendered
             plan_description.append(
-                {
-                    "target_id": target_id,
-                    "recipients": rendered,
-                }
+                {"target_id": target_id, "recipients": rendered}
             )
         plan_hash = hashlib.sha256(
             _canonical_json(
@@ -751,7 +796,8 @@ class DatabaseV2Migrator:
             "INSERT INTO route_plans("
             "id,event_id,config_revision,routing_schema_version,planner_version,"
             "plan_hash,plan_state,created_at"
-            ") VALUES (?, ?, 'legacy-v1', ?, 'migration-v2', ?, 'legacy_migrated', ?)",
+            ") VALUES (?, ?, 'legacy-v1', ?, 'migration-v2', ?, "
+            "'legacy_migrated', ?)",
             (route_id, event_id, ROUTING_SCHEMA_VERSION, plan_hash, created),
         )
         target_count = 0
@@ -760,7 +806,9 @@ class DatabaseV2Migrator:
             normalized = normalized_groups[target_id]
             statuses = {entry["status"] for entry in normalized}
             successes = sum(
-                1 for entry in normalized if entry["status"] in _SUCCESS_RECIPIENT_STATES
+                1
+                for entry in normalized
+                if entry["status"] in _SUCCESS_RECIPIENT_STATES
             )
             if successes == len(normalized):
                 target_state = "delivered"
@@ -879,19 +927,26 @@ class DatabaseV2Migrator:
     ) -> None:
         migrated = int(
             db.execute(
-                "SELECT COUNT(*) FROM history_events WHERE legacy_item_id IS NOT NULL"
+                "SELECT COUNT(*) FROM history_events "
+                "WHERE legacy_item_id IS NOT NULL"
             ).fetchone()[0]
         )
         if migrated != expected_history_items:
-            raise MigrationV2Error("v1 history count does not match migrated events")
+            raise MigrationV2Error(
+                "v1 history count does not match migrated events"
+            )
         unsafe_targets = int(
             db.execute(
-                "SELECT COUNT(*) FROM target_deliveries "
-                "WHERE state IN ('pending','claimed','failed_retryable')"
+                "SELECT COUNT(*) FROM target_deliveries td "
+                "JOIN route_plans rp ON rp.id=td.route_plan_id "
+                "WHERE rp.plan_state='legacy_migrated' "
+                "AND td.state IN ('pending','claimed','failed_retryable')"
             ).fetchone()[0]
         )
         if unsafe_targets:
-            raise MigrationV2Error("migration created externally retryable deliveries")
+            raise MigrationV2Error(
+                "migration created externally retryable deliveries"
+            )
         foreign_keys = _foreign_key_violations(db)
         if foreign_keys:
             raise MigrationV2Error("v2 foreign_key_check failed")
@@ -917,7 +972,9 @@ def verify_database_v2(database_path: Path) -> dict[str, Any]:
     _assert_regular_owned_database(path)
     with _connect(path) as db:
         versions = _schema_versions(db)
-        missing = tuple(table for table in V2_TABLES if not _table_exists(db, table))
+        missing = tuple(
+            table for table in V2_TABLES if not _table_exists(db, table)
+        )
         quick = _quick_check(db)
         foreign_keys = _foreign_key_violations(db)
         history_items = (
@@ -930,29 +987,48 @@ def verify_database_v2(database_path: Path) -> dict[str, Any]:
             if _table_exists(db, "history_events")
             else 0
         )
+        migrated_legacy_events = (
+            int(
+                db.execute(
+                    "SELECT COUNT(*) FROM history_events "
+                    "WHERE legacy_item_id IS NOT NULL"
+                ).fetchone()[0]
+            )
+            if _table_exists(db, "history_events")
+            else 0
+        )
         route_plans = (
             int(db.execute("SELECT COUNT(*) FROM route_plans").fetchone()[0])
             if _table_exists(db, "route_plans")
             else 0
         )
         target_deliveries = (
-            int(db.execute("SELECT COUNT(*) FROM target_deliveries").fetchone()[0])
+            int(
+                db.execute("SELECT COUNT(*) FROM target_deliveries").fetchone()[0]
+            )
             if _table_exists(db, "target_deliveries")
             else 0
         )
         recipient_deliveries = (
-            int(db.execute("SELECT COUNT(*) FROM recipient_deliveries").fetchone()[0])
+            int(
+                db.execute(
+                    "SELECT COUNT(*) FROM recipient_deliveries"
+                ).fetchone()[0]
+            )
             if _table_exists(db, "recipient_deliveries")
             else 0
         )
         unsafe_targets = (
             int(
                 db.execute(
-                    "SELECT COUNT(*) FROM target_deliveries "
-                    "WHERE state IN ('pending','claimed','failed_retryable')"
+                    "SELECT COUNT(*) FROM target_deliveries td "
+                    "JOIN route_plans rp ON rp.id=td.route_plan_id "
+                    "WHERE rp.plan_state='legacy_migrated' "
+                    "AND td.state IN ('pending','claimed','failed_retryable')"
                 ).fetchone()[0]
             )
             if _table_exists(db, "target_deliveries")
+            and _table_exists(db, "route_plans")
             else 0
         )
     ok = (
@@ -960,7 +1036,8 @@ def verify_database_v2(database_path: Path) -> dict[str, Any]:
         and not missing
         and quick == "ok"
         and not foreign_keys
-        and history_events == history_items
+        and migrated_legacy_events == history_items
+        and history_events >= history_items
         and unsafe_targets == 0
     )
     return {
@@ -971,6 +1048,7 @@ def verify_database_v2(database_path: Path) -> dict[str, Any]:
         "foreign_key_violations": list(foreign_keys),
         "history_items": history_items,
         "history_events": history_events,
+        "migrated_legacy_events": migrated_legacy_events,
         "route_plans": route_plans,
         "target_deliveries": target_deliveries,
         "recipient_deliveries": recipient_deliveries,
@@ -1001,6 +1079,8 @@ def restore_database_backup(
         if _quick_check(source) != "ok":
             raise MigrationV2Error("backup quick_check failed")
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _assert_no_symlink_chain(destination.parent)
+    os.chmod(destination.parent, 0o700)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{destination.name}.",
         suffix=".restore.tmp",
@@ -1009,23 +1089,28 @@ def restore_database_backup(
     os.close(descriptor)
     temporary = Path(temporary_name)
     try:
-        with _connect(backup) as source, sqlite3.connect(temporary) as restored:
-            source.backup(restored)
-            restored.commit()
-            if _quick_check(restored) != "ok":
-                raise MigrationV2Error("restored database quick_check failed")
-        with temporary.open("rb") as handle:
+        with _connect(backup) as source:
+            restored = sqlite3.connect(temporary)
+            try:
+                restored.execute("PRAGMA journal_mode=DELETE")
+                source.backup(restored)
+                restored.commit()
+                if _quick_check(restored) != "ok":
+                    raise MigrationV2Error(
+                        "restored database quick_check failed"
+                    )
+            finally:
+                restored.close()
+        _remove_sqlite_sidecars(temporary)
+        with temporary.open("rb+") as handle:
             os.fsync(handle.fileno())
         os.chmod(temporary, 0o600)
         if destination.exists():
             with _connect(destination) as current:
                 current.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         os.replace(temporary, destination)
-        for suffix in ("-wal", "-shm"):
-            try:
-                destination.with_name(destination.name + suffix).unlink()
-            except FileNotFoundError:
-                pass
+        _remove_sqlite_sidecars(temporary)
+        _remove_sqlite_sidecars(destination)
         _fsync_directory(destination.parent)
         return {
             "ok": True,
@@ -1034,6 +1119,7 @@ def restore_database_backup(
             "quick_check": "ok",
         }
     finally:
+        _remove_sqlite_sidecars(temporary)
         try:
             temporary.unlink()
         except FileNotFoundError:
