@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import Barrier
 
+import pytest
+
 from history_dispatcher.classification_types import (
     AgentContext,
     ClassifiedEvent,
@@ -15,6 +17,7 @@ from history_dispatcher.crypto import StaticKeyProvider
 from history_dispatcher.delivery_store import (
     NATIVE_TELEGRAM_CAPABILITY_V1,
     VAULT_CAPABILITY_V1,
+    DeliveryClaimRejected,
     DeliveryStore,
 )
 from history_dispatcher.migrations import DatabaseV2Migrator, DatabaseV3Migrator
@@ -113,12 +116,9 @@ def test_two_workers_cannot_claim_the_same_target_concurrently(
         )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        results = sorted(
-            (
-                executor.submit(claim, "worker-one", "a").result(),
-                executor.submit(claim, "worker-two", "b").result(),
-            )
-        )
+        first = executor.submit(claim, "worker-one", "a")
+        second = executor.submit(claim, "worker-two", "b")
+        results = sorted((first.result(timeout=10), second.result(timeout=10)))
 
     assert results == [0, 1]
 
@@ -175,16 +175,10 @@ def test_native_worker_cannot_register_unplanned_recipient(tmp_path: Path) -> No
         capability_version=NATIVE_TELEGRAM_CAPABILITY_V1,
     )[0]
 
-    from history_dispatcher.delivery_store import DeliveryClaimRejected
-
-    try:
+    with pytest.raises(DeliveryClaimRejected, match="unplanned recipient"):
         store.register_recipients(
             target_delivery_id=claim.target_delivery_id,
             worker_id="telegram-worker",
             claim_token=claim.claim_token,
             recipient_refs=("unplanned_admin",),
         )
-    except DeliveryClaimRejected:
-        pass
-    else:
-        raise AssertionError("unplanned native recipient was accepted")
