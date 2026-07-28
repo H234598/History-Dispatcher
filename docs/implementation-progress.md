@@ -21,13 +21,15 @@
 
 - [x] Verzeichnisse für aktuelle, Legacy-, Sub-Agent- und Malformed-Fixtures angelegt.
 - [x] aktuellen `openai/codex`-Protokollstand gegen Commit `8e271dc02b23d42827875019924be0f5005642b0` verifiziert.
-- [x] deterministischen, streamingbasierten Fixture-Sanitizer implementiert.
-- [x] IDs, Pfade, URLs, Namen, Text und secretartige Schlüssel pseudonymisiert beziehungsweise redigiert.
-- [x] Doppelkeys, nicht endliche JSON-Werte, Nicht-Objekte, ungültiges UTF-8 und übergroße Zeilen fail-closed behandelt.
-- [x] atomaren privaten Output und Dry Run implementiert.
-- [x] Fixturemanifest mit SHA-256, Zeilenzahlen, erwarteten Kinds/Issues und Upstreamcommit erzeugt.
+- [x] streamingbasierten Fixture-Sanitizer implementiert.
+- [x] IDs, Pfade, URLs, Namen, Text, unbekannte Felder und secretartige Schlüssel pseudonymisiert beziehungsweise redigiert.
+- [x] veröffentlichte Pseudonyme durch fixturelokale First-seen-Aliasse ersetzt; sie sind nicht aus erratbaren Klartext-Hashes abgeleitet.
+- [x] Doppelkeys, nicht endliche JSON-Werte, Nicht-Objekte, ungültiges UTF-8, Rekursion und übergroße Zeilen fail-closed behandelt.
+- [x] Zeilengrenze vor unbeschränktem Buffering und vor UTF-8-Decoding durchgesetzt.
+- [x] atomaren privaten Output und vollständig schreibfreien Dry Run implementiert.
+- [x] Fixturemanifest mit SHA-256, Zeilenzahlen, erwarteten Kinds, Confidence, Dispatchfähigkeit, Issues und Upstreamcommit erzeugt.
 - [x] Root-, phase-missing-, Multi-Turn-, Future-Type-, Sub-Agent-, Legacy- und Malformed-Fixtures aufgenommen.
-- [x] Leaktests verhindern reale Token-, E-Mail- und Privatpfadmarker.
+- [x] Leaktests verhindern Token-, Authorization-, Secret-Zuweisungs-, Credential-URL-, E-Mail- und Privatpfadmarker.
 
 ### Classifier, Redaction und Dedupe (`WP-011`, `B-012` bis `B-024`)
 
@@ -39,19 +41,25 @@
 - [x] Reasoning, Tool-, User-, System-, Developer- und nicht sichtbare Contentteile ausgeschlossen.
 - [x] expliziten Quiescence-Fallback implementiert, aber nicht automatisch aktiviert.
 - [x] Legacyfallback als `legacy` und extern fail-closed implementiert.
-- [x] zentrale Text-/Token-/Pfad-/E-Mail-Redaction und UTF-8-Bytegrenze implementiert.
+- [x] zentrale Text-/Token-/Credential-/Pfad-/E-Mail-Redaction und UTF-8-Bytegrenze implementiert.
+- [x] vollständige Authorization-/WWW-Authenticate-Werte und gequotete Secretwerte mit Leerzeichen redigiert.
 - [x] rohe Session-/Turn-/Parent-/Response-IDs aus der öffentlichen Eventansicht entfernt.
 - [x] stabile Event-/Dedupe-Keys implementiert und doppelte Completionzeilen dedupliziert.
-- [x] interne Sessions oder fehlende Sessionidentität extern fail-closed behandelt.
-- [x] lokale Vollsuite: 50 Tests grün; davon 34 neue Classifier-/Sanitizer-/Fixturetests.
+- [x] interne Sessions sowie fehlende Session-, Turn- oder Projektidentität extern fail-closed behandelt.
+- [x] explizite Turn-IDs greifen niemals auf Kandidaten eines anderen Turns zurück.
+- [x] widersprüchliche `last_agent_message`-Werte überschreiben keinen validierten sichtbaren Assistanttext und erzeugen `unknown`/nicht dispatchfähig.
+- [x] Rekursion und gespeicherte Einzelissues hart begrenzt.
+- [x] GitHub-Actions-Lauf `30357023199` auf Head `aa5bf894df07270bd900cb67ab38ccd4839861fd` vollständig grün.
 
 ### Noch offen vor Merge
 
-- [ ] Dateien auf den Arbeitsbranch committen und Draft-PR #2 eröffnen.
-- [ ] GitHub Actions auf dem exakten PR-Head grün.
-- [ ] qlty grün.
-- [ ] CodeRabbit vollständig grün; alle neuen Threads fachlich bearbeiten und lösen.
-- [ ] Test-/Reviewevidenz mit finaler Head-SHA in diesem Dokument nachpflegen.
+- [x] Dateien auf den Arbeitsbranch veröffentlicht und PR #2 eröffnet.
+- [x] PR #2 aus dem Draft genommen.
+- [x] sämtliche zehn konkreten CodeRabbit-Befunde sowie die anwendbaren Nitpicks implementiert.
+- [x] GitHub Actions auf dem aktuellen Review-Fix-Head grün.
+- [ ] qlty auf dem finalen Head grün.
+- [ ] CodeRabbit auf dem finalen Head freigegeben; alle Threads gelöst.
+- [ ] Test-/Reviewevidenz mit endgültiger Head-SHA nachpflegen.
 - [ ] PR #2 per Squash mit erwarteter Head-SHA mergen.
 
 ## Bewusste Schnittgrenze
@@ -61,16 +69,33 @@ in diesem PR **nicht** umgestellt. Dadurch bleibt der bestehende
 `codex_run_summary`-Produktionspfad bis zum eigenen Integrations-/Migrations-PR
 unverändert.
 
+Die stabilen öffentlichen Korrelationswerte dieses isolierten Classifiers sind
+Pseudonyme, keine Anonymitätsgrenze. Vor einer externen v2-Auslieferung bindet
+der DB-v2-/Integrationsschnitt Projekt-, Session-, Turn- und Parent-IDs an einen
+lokal persistenten Secret-Service-Schlüssel. Der aktuelle PR führt bewusst noch
+keinen persistenten Secretzugriff in den reinen Classifier ein.
+
 ## Nächster Schnitt nach grünem Merge
 
-`PR-HD-03-collector-classifier-adapter` beziehungsweise der im Plan vorgesehene
-Collector-v2-Vorbereitungsschnitt:
+`PR-HD-03-db-v2-migration` gemäß der verbindlichen PR-Reihenfolge und `WP-020`
+mit vorbereitendem Anteil aus `WP-021`:
 
-1. Classifier über eine additive Adaptergrenze in `sources.py`/`collector.py`
-   einführen;
-2. Cursor um Byteoffset, vollständiges Ordinal und File-Identität erweitern;
-3. Partial-Line-, Rotation-, Resume- und verspätete Sub-Agent-Fälle abdecken;
-4. noch ohne externe v2-Routepläne arbeiten, bis DB-v2 bereitsteht.
+1. additive Tabellen für `history_events`, `route_plans`,
+   `target_deliveries`, `recipient_deliveries`, `delivery_attempts`,
+   `local_archive_entries`, Heartbeats, Config-Audit und Migrationsjournal
+   definieren;
+2. SQLite-Backup, Preflight, Migrationsjournal, Verify und Restoretest
+   implementieren;
+3. monotone Ziel-/Empfängerzustände und eindeutige Delivery-/Dedupe-Constraints
+   als Store-Vertrag anlegen;
+4. v1-Bestand ohne neuen externen Dispatch auf eindeutige Legacyzuordnung oder
+   `unknown/legacy_hold` migrieren;
+5. den produktiven Collector weiterhin unverändert lassen, bis die sichere
+   v2-Persistenzschnittstelle gemergt ist.
+
+Der Collector-/Cursor-Umbau aus `WP-012` folgt danach auf der gemergten
+DB-v2-Schnittstelle. Dadurch werden klassifizierte Events nicht vorzeitig in ein
+unzureichendes v1-Queue-/Deliverymodell geschrieben.
 
 ## Pflegevorgabe
 
