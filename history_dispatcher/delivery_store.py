@@ -1368,11 +1368,11 @@ class DeliveryStore:
         )
         total = sum(counts.values())
         if active:
-            return "partial" if delivered or partial else "pending"
+            return "partial" if partial else "pending"
         if partial:
             return "partial"
         if failures:
-            return "partial" if delivered or skipped else "failed"
+            return "partial" if delivered else "failed"
         if delivered:
             return "delivered"
         if skipped == total:
