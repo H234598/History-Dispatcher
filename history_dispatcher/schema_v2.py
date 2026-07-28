@@ -142,6 +142,12 @@ CREATE TABLE IF NOT EXISTS delivery_attempts (
 );
 CREATE INDEX IF NOT EXISTS idx_delivery_attempts_target
     ON delivery_attempts(target_delivery_id, started_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_delivery_attempts_target_level_unique
+    ON delivery_attempts(target_delivery_id, attempt_no)
+    WHERE recipient_delivery_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_delivery_attempts_recipient_level_unique
+    ON delivery_attempts(recipient_delivery_id, attempt_no)
+    WHERE recipient_delivery_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS local_archive_entries (
     event_id TEXT PRIMARY KEY REFERENCES history_events(id) ON DELETE CASCADE,
