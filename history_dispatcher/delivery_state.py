@@ -35,6 +35,15 @@ class RecipientDeliveryState(str, Enum):
     LEGACY_HOLD = "legacy_hold"
 
 
+_SUCCESS_RECIPIENT_STATES = frozenset(
+    {
+        RecipientDeliveryState.ACCEPTED,
+        RecipientDeliveryState.DELIVERED,
+        RecipientDeliveryState.ACKNOWLEDGED,
+    }
+)
+
+
 _TARGET_TRANSITIONS: dict[TargetDeliveryState, frozenset[TargetDeliveryState]] = {
     TargetDeliveryState.PENDING: frozenset(
         {
@@ -55,10 +64,14 @@ _TARGET_TRANSITIONS: dict[TargetDeliveryState, frozenset[TargetDeliveryState]] =
             TargetDeliveryState.FAILED_RETRYABLE,
             TargetDeliveryState.FAILED_TERMINAL,
             TargetDeliveryState.QUARANTINED,
+            TargetDeliveryState.SKIPPED_DISABLED,
+            TargetDeliveryState.SKIPPED_FILTERED,
+            TargetDeliveryState.SKIPPED_UNKNOWN,
         }
     ),
     TargetDeliveryState.PARTIAL: frozenset(
         {
+            TargetDeliveryState.CLAIMED,
             TargetDeliveryState.DELIVERED,
             TargetDeliveryState.FAILED_RETRYABLE,
             TargetDeliveryState.FAILED_TERMINAL,
@@ -118,8 +131,12 @@ _RECIPIENT_TRANSITIONS: dict[
         {
             RecipientDeliveryState.PENDING,
             RecipientDeliveryState.CLAIMED,
+            RecipientDeliveryState.ACCEPTED,
+            RecipientDeliveryState.DELIVERED,
+            RecipientDeliveryState.ACKNOWLEDGED,
             RecipientDeliveryState.FAILED_TERMINAL,
             RecipientDeliveryState.QUARANTINED,
+            RecipientDeliveryState.SKIPPED,
             RecipientDeliveryState.POSSIBLE_DUPLICATE,
         }
     ),
@@ -142,10 +159,10 @@ _RECIPIENT_TRANSITIONS: dict[
         {RecipientDeliveryState.ACKNOWLEDGED}
     ),
     RecipientDeliveryState.ACKNOWLEDGED: frozenset(),
-    RecipientDeliveryState.FAILED_TERMINAL: frozenset(),
-    RecipientDeliveryState.QUARANTINED: frozenset(),
-    RecipientDeliveryState.SKIPPED: frozenset(),
-    RecipientDeliveryState.LEGACY_HOLD: frozenset(),
+    RecipientDeliveryState.FAILED_TERMINAL: _SUCCESS_RECIPIENT_STATES,
+    RecipientDeliveryState.QUARANTINED: _SUCCESS_RECIPIENT_STATES,
+    RecipientDeliveryState.SKIPPED: _SUCCESS_RECIPIENT_STATES,
+    RecipientDeliveryState.LEGACY_HOLD: _SUCCESS_RECIPIENT_STATES,
 }
 
 
@@ -195,18 +212,16 @@ def target_state_is_terminal(value: TargetDeliveryState | str) -> bool:
 
 
 def recipient_state_is_successful(value: RecipientDeliveryState | str) -> bool:
-    return RecipientDeliveryState(value) in {
-        RecipientDeliveryState.ACCEPTED,
-        RecipientDeliveryState.DELIVERED,
-        RecipientDeliveryState.ACKNOWLEDGED,
-    }
+    return RecipientDeliveryState(value) in _SUCCESS_RECIPIENT_STATES
 
 
 def recipient_state_is_terminal(value: RecipientDeliveryState | str) -> bool:
     """Return whether the recipient must be excluded from automatic retries.
 
     Accepted and delivered outcomes may still advance monotonically when a later
-    receipt arrives, but they are already terminal for resend decisions.
+    receipt arrives, but they are already terminal for resend decisions. A later
+    externally proven success may also reconcile a skipped or failed terminal
+    row without reopening it for automatic retries.
     """
 
     state = RecipientDeliveryState(value)
