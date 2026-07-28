@@ -5,6 +5,21 @@ Standalone, local-only encrypted history collection and dispatch service.
 The control interface is a versioned Unix socket. The service does not expose an
 IP listener and stores payloads encrypted with a dedicated Secret Service key.
 
+## Architecture and implementation tracking
+
+The current v1 security boundary and the accepted direction for the Cinnamon
+applet expansion are documented in:
+
+- [`docs/architecture.md`](docs/architecture.md) — components, data flow and
+  failure domains;
+- [`docs/contracts/`](docs/contracts/) — frozen control, status and security
+  contracts;
+- [`docs/adr/`](docs/adr/) — ADR-001 through ADR-016;
+- [`docs/implementation-progress.md`](docs/implementation-progress.md) — the
+  sequential implementation status;
+- [`docs/reuse-ledger.md`](docs/reuse-ledger.md) — source, licence and parity
+  tracking for future adaptations.
+
 ## Development
 
     python3 -m venv .venv-py313
