@@ -75,13 +75,20 @@ def test_v3_dry_run_is_write_free(tmp_path: Path) -> None:
     assert report.dry_run is True
     assert report.target_deliveries == 1
     assert report.bindings == 1
+    assert report.recipient_deliveries == 1
+    assert report.recipient_bindings == 1
     assert backup_dir.exists() is False
     assert _versions(store.database_path) == [1, 2]
     with sqlite3.connect(store.database_path) as db:
-        assert db.execute(
-            "SELECT COUNT(*) FROM sqlite_master "
-            "WHERE type='table' AND name='target_delivery_bindings'"
-        ).fetchone()[0] == 0
+        for table in (
+            "target_delivery_bindings",
+            "recipient_delivery_bindings",
+        ):
+            assert db.execute(
+                "SELECT COUNT(*) FROM sqlite_master "
+                "WHERE type='table' AND name=?",
+                (table,),
+            ).fetchone()[0] == 0
 
 
 def test_v3_migration_binds_legacy_targets_without_redispatch(tmp_path: Path) -> None:
@@ -99,10 +106,14 @@ def test_v3_migration_binds_legacy_targets_without_redispatch(tmp_path: Path) ->
     assert report.source_schema_version == 2
     assert report.target_schema_version == 3
     assert report.target_deliveries == report.bindings == 1
+    assert report.recipient_deliveries == report.recipient_bindings == 1
     assert report.no_external_dispatch_created is True
     assert report.backup is not None
     assert _versions(store.database_path) == [1, 2, 3]
-    assert verify_database_v3(store.database_path)["ok"] is True
+    verification = verify_database_v3(store.database_path)
+    assert verification["ok"] is True
+    assert verification["target_deliveries"] == verification["bindings"] == 1
+    assert verification["recipient_deliveries"] == verification["recipient_bindings"] == 1
 
     with sqlite3.connect(store.database_path) as db:
         db.row_factory = sqlite3.Row
@@ -117,6 +128,12 @@ def test_v3_migration_binds_legacy_targets_without_redispatch(tmp_path: Path) ->
             "provider": "legacy_unknown",
             "schema_version": 0,
         }
+        recipient_binding = db.execute(
+            "SELECT recipient_ref,recipient_ref_hash "
+            "FROM recipient_delivery_bindings"
+        ).fetchone()
+        assert recipient_binding["recipient_ref"].startswith("legacy_recipient_")
+        assert len(recipient_binding["recipient_ref_hash"]) == 64
         target = db.execute(
             "SELECT state,claim_worker_id,claim_token_hash,claim_expires_at "
             "FROM target_deliveries"
@@ -199,11 +216,20 @@ def test_v3_constraints_make_bindings_immutable_and_claim_fields_consistent(
         target_id = db.execute(
             "SELECT target_delivery_id FROM target_delivery_bindings LIMIT 1"
         ).fetchone()[0]
+        recipient_id = db.execute(
+            "SELECT recipient_delivery_id FROM recipient_delivery_bindings LIMIT 1"
+        ).fetchone()[0]
         with pytest.raises(sqlite3.IntegrityError, match="immutable"):
             db.execute(
                 "UPDATE target_delivery_bindings SET provider_id='teebotus' "
                 "WHERE target_delivery_id=?",
                 (target_id,),
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute(
+                "UPDATE recipient_delivery_bindings SET recipient_ref='changed' "
+                "WHERE recipient_delivery_id=?",
+                (recipient_id,),
             )
         with pytest.raises(sqlite3.IntegrityError, match="claim fields"):
             db.execute(
