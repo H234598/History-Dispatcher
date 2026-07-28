@@ -84,7 +84,7 @@ WHEN OLD.state <> NEW.state AND NOT (
         'quarantined','skipped_disabled','skipped_filtered','skipped_unknown'
     )) OR
     (OLD.state='partial' AND NEW.state IN (
-        'delivered','failed_retryable','failed_terminal','quarantined'
+        'claimed','delivered','failed_retryable','failed_terminal','quarantined'
     )) OR
     (OLD.state='failed_retryable' AND NEW.state IN (
         'pending','claimed','failed_terminal','quarantined'
@@ -92,6 +92,34 @@ WHEN OLD.state <> NEW.state AND NOT (
 )
 BEGIN
     SELECT RAISE(ABORT, 'invalid target delivery state transition');
+END;
+
+DROP TRIGGER IF EXISTS trg_recipient_delivery_state_transition;
+CREATE TRIGGER trg_recipient_delivery_state_transition
+BEFORE UPDATE OF state ON recipient_deliveries
+WHEN OLD.state <> NEW.state AND NOT (
+    (OLD.state='pending' AND NEW.state IN (
+        'claimed','accepted','delivered','acknowledged','failed_retryable',
+        'failed_terminal','quarantined','skipped','possible_duplicate','legacy_hold'
+    )) OR
+    (OLD.state='claimed' AND NEW.state IN (
+        'pending','accepted','delivered','acknowledged','failed_retryable',
+        'failed_terminal','quarantined','skipped','possible_duplicate'
+    )) OR
+    (OLD.state='failed_retryable' AND NEW.state IN (
+        'pending','claimed','accepted','delivered','acknowledged',
+        'failed_terminal','quarantined','skipped','possible_duplicate'
+    )) OR
+    (OLD.state='possible_duplicate' AND NEW.state IN (
+        'accepted','delivered','acknowledged','failed_terminal','quarantined'
+    )) OR
+    (OLD.state='accepted' AND NEW.state IN ('delivered','acknowledged')) OR
+    (OLD.state='delivered' AND NEW.state='acknowledged') OR
+    (OLD.state IN ('failed_terminal','quarantined','skipped','legacy_hold')
+        AND NEW.state IN ('accepted','delivered','acknowledged'))
+)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid recipient delivery state transition');
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_target_delivery_claim_fields_insert
