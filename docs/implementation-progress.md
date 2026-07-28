@@ -15,8 +15,8 @@
 - [x] Reuse Ledger initialisiert; in diesem Schnitt wurde kein externer Code übernommen (`A-014`).
 - [x] Architektur-, Applet- und v1-Vertragsdokumentation erstellt (`WP-001`).
 - [x] Negativtests für Socket-, Crypto-, Snapshot-, Applet- und systemd-Grenzen erstellt (`WP-001`).
-- [ ] GitHub-Actions-Gates auf dem neuen Commit vollständig grün.
-- [ ] Reviewbefunde abgearbeitet.
+- [x] GitHub-Actions-Run `30340908142` auf Commit `a7b883b11b57d84c899bc7a94b6b3e1eb2d17f02` vollständig grün: Installation, Syntax/tests und Build.
+- [ ] Reviewbefunde abgearbeitet; vor Merge werden Threads und Reviews erneut geprüft.
 - [ ] Baseline-PR gemergt (`A-015`).
 
 ## Nächster Schnitt nach grünem Merge
