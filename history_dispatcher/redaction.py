@@ -15,9 +15,17 @@ MAX_PROJECT_LABEL_CHARS = 80
 _OPENAI_TOKEN_RE = re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{12,}\b")
 _TELEGRAM_TOKEN_RE = re.compile(r"\b\d{6,12}:[A-Za-z0-9_-]{20,}\b")
 _BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+\-/=]{8,}")
+_AUTH_CREDENTIAL_RE = re.compile(
+    r"(?im)\b(?P<key>authorization|proxy-authorization|www-authenticate)"
+    r"\s*[:=]\s*(?!\[redacted\]\s*$)[^\r\n]+"
+)
 _SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|authorization)"
-    r"\s*[:=]\s*(['\"]?)([^\s'\"`,;]{4,})\2"
+    r"(?ix)\b(?P<key>api[_-]?key|access[_-]?token|refresh[_-]?token|token|"
+    r"password|passwd|secret)\s*[:=]\s*(?!\[redacted\])(?:"
+    r'"(?:\\.|[^"\\])*"|'
+    r"'(?:\\.|[^'\\])*'|"
+    r"[^\s'\"`,;]+"
+    r")"
 )
 _EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 _UNIX_PRIVATE_PATH_RE = re.compile(
@@ -85,10 +93,17 @@ def redact_text(
     text = unicodedata.normalize("NFC", text).replace("\r\n", "\n").replace("\r", "\n")
     text = _CONTROL_RE.sub("�", text)
     text = _URL_WITH_CREDENTIALS_RE.sub(r"\1[redacted]@", text)
+    text = _AUTH_CREDENTIAL_RE.sub(
+        lambda match: f"{match.group('key')}=[redacted]",
+        text,
+    )
     text = _OPENAI_TOKEN_RE.sub("[redacted-token]", text)
     text = _TELEGRAM_TOKEN_RE.sub("[redacted-token]", text)
     text = _BEARER_RE.sub("Bearer [redacted-token]", text)
-    text = _SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=[redacted]", text)
+    text = _SECRET_ASSIGNMENT_RE.sub(
+        lambda match: f"{match.group('key')}=[redacted]",
+        text,
+    )
     text = _EMAIL_RE.sub("[redacted-email]", text)
     text = _UNIX_PRIVATE_PATH_RE.sub("[redacted-path]", text)
     text = _WINDOWS_PRIVATE_PATH_RE.sub("[redacted-path]", text)
@@ -126,6 +141,14 @@ def visible_output_text(
 
 
 def stable_opaque_id(prefix: str, value: Any, *, length: int = 24) -> str:
+    """Return a stable pseudonymous correlation ID, not an anonymity boundary.
+
+    The isolated classifier has no persistent secret dependency. Before these
+    identifiers become an external protocol field, the DB-v2 integration must
+    derive them with the locally persisted Secret-Service key. Until then raw
+    source identifiers remain absent from the public event representation.
+    """
+
     normalized = unicodedata.normalize("NFC", str(value or "").strip())
     if not normalized:
         return f"{prefix}_unknown"
@@ -164,10 +187,7 @@ def _basename(value: str) -> str:
     normalized = value.replace("\\", "/").rstrip("/")
     if not normalized:
         return ""
-    try:
-        return PurePosixPath(normalized).name
-    except Exception:
-        return ""
+    return PurePosixPath(normalized).name
 
 
 def project_identity(*, remote: Any = "", cwd: Any = "") -> tuple[str, str]:
@@ -197,6 +217,10 @@ def contains_sensitive_marker(text: str) -> bool:
     checks: Iterable[re.Pattern[str]] = (
         _OPENAI_TOKEN_RE,
         _TELEGRAM_TOKEN_RE,
+        _BEARER_RE,
+        _AUTH_CREDENTIAL_RE,
+        _SECRET_ASSIGNMENT_RE,
+        _URL_WITH_CREDENTIALS_RE,
         _EMAIL_RE,
         _UNIX_PRIVATE_PATH_RE,
         _WINDOWS_PRIVATE_PATH_RE,
