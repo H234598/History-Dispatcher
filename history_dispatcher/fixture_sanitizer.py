@@ -271,11 +271,11 @@ def sanitize_jsonl_file(
     output_hash = hashlib.sha256()
     line_count = 0
     output = Path(output_path)
-    output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     descriptor: int | None = None
     temporary: Path | None = None
     handle = None
     if not dry_run:
+        output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{output.name}.", suffix=".tmp", dir=output.parent
         )

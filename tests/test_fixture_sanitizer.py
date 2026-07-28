@@ -122,18 +122,20 @@ def test_sanitizer_rejects_invalid_json_utf8_non_objects_and_oversize() -> None:
 
 def test_file_sanitizer_dry_run_writes_nothing_and_atomic_write_is_private(tmp_path: Path) -> None:
     source = tmp_path / "private.jsonl"
-    output = tmp_path / "sanitized.jsonl"
+    output = tmp_path / "not-created-during-dry-run" / "sanitized.jsonl"
     source.write_bytes(_private_source())
+    assert output.parent.exists() is False
 
     result = sanitize_jsonl_file(source, output, dry_run=True)
     assert result.line_count == 2
     assert output.exists() is False
+    assert output.parent.exists() is False
 
     written = sanitize_jsonl_file(source, output)
     assert written.output_bytes is None
     assert hashlib.sha256(output.read_bytes()).hexdigest() == written.output_sha256
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
-    assert not list(tmp_path.glob("*.tmp"))
+    assert not list(output.parent.glob("*.tmp"))
 
 
 def test_manifest_contains_only_hash_reference_and_upstream_commit(tmp_path: Path) -> None:
