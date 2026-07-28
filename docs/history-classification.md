@@ -25,9 +25,9 @@ teilaktiv wird.
 
 | `history_kind` | Bedeutung | Primäre Evidenz | externe Dispatchfähigkeit im Classifier |
 |---|---|---|---|
-| `subagent_completion` | Abschluss einer eindeutig als Sub-Agent identifizierten Session | `parent_thread_id`, `thread_source=subagent` oder `source=subagent/thread_spawn` plus Turn-Abschluss | nur `authoritative`/`compatible`, bekannte Session und bekanntes Projekt |
-| `intermediate_update` | sichtbare, nicht abschließende Assistant-Zwischenmeldung | Assistant-`response_item` mit `phase=commentary`; kompatibel auch `event_msg/agent_message` | nur bei bekannter Session/Projektidentität |
-| `task_completion` | Abschluss eines Root-Turns | `task_complete`/`turn_complete` plus korrelierte finale Assistant-Antwort | nur `authoritative`/`compatible`, bekannte Session und bekanntes Projekt |
+| `subagent_completion` | Abschluss einer eindeutig als Sub-Agent identifizierten Session | `parent_thread_id`, `thread_source=subagent` oder `source=subagent/thread_spawn` plus Turn-Abschluss | nur `authoritative`/`compatible` sowie bekannte Session-, Turn- und Projektidentität |
+| `intermediate_update` | sichtbare, nicht abschließende Assistant-Zwischenmeldung | Assistant-`response_item` mit `phase=commentary`; kompatibel auch `event_msg/agent_message` | nur bei bekannter Session-, Turn- und Projektidentität |
+| `task_completion` | Abschluss eines Root-Turns | `task_complete`/`turn_complete` plus korrelierte finale Assistant-Antwort | nur `authoritative`/`compatible` sowie bekannte Session-, Turn- und Projektidentität |
 | `unknown` | unbekanntes, mehrdeutiges, internes oder unvollständiges Ereignis | fehlende/konfliktäre Evidenz oder zukünftiger Rollouttyp | immer `false` |
 
 Zusatzfelder:
@@ -42,10 +42,13 @@ Zusatzfelder:
 
 ## 3. Verarbeitungsreihenfolge
 
-1. Eine JSONL-Zeile wird vor dem Parse auf ein hartes Byte-Limit geprüft.
+1. Eine JSONL-Zeile wird **vor UTF-8-Decoding und Parse** auf ein hartes
+   Byte-Limit geprüft.
 2. UTF-8, eindeutige JSON-Objektschlüssel und endliche JSON-Zahlen sind
    verpflichtend. Doppelkeys, `NaN`, `Infinity`, Arrays oder ungültige
-   Envelopes werden als begrenzte Issues protokolliert.
+   Envelopes werden als begrenzte Issues protokolliert. Standardmäßig werden
+   höchstens 256 Einzelissues gespeichert; weitere Probleme werden durch ein
+   einziges `issues_truncated`-Aggregat ausgewiesen.
 3. `session_meta` setzt Session-, Parent-, Agent- und Projektkontext.
 4. Interne Codex-Sessions oder Session-Metadaten ohne stabile ID erhalten
    `agent_context=unknown` und bleiben extern fail-closed.
@@ -61,12 +64,15 @@ Zusatzfelder:
    Nachricht wird zunächst turnbezogen gepuffert.
 9. `task_complete`/`turn_complete` korreliert den Turn und erzeugt je nach
    Agentkontext `task_completion`, `subagent_completion` oder `unknown`.
-10. Ein Abschluss ohne explizites Completion-Event wird nur dann erzeugt, wenn
+10. Fehlt eine stabile Turn-ID, darf das Ereignis für interne Diagnose und
+    spätere Reconciliation erhalten bleiben, ist aber niemals extern
+    dispatchfähig.
+11. Ein Abschluss ohne explizites Completion-Event wird nur dann erzeugt, wenn
     der Aufrufer ausdrücklich `source_quiescent=True` setzt. Der spätere
     Collector muss die im Plan festgelegte Quiescence-Frist selbst beweisen.
-11. Legacy-`event`/`phase=final` bleibt `confidence=legacy` und ist unabhängig
+12. Legacy-`event`/`phase=final` bleibt `confidence=legacy` und ist unabhängig
     vom Projektnamen nicht extern dispatchfähig.
-12. Unbekannte zukünftige Top-Level-Typen erzeugen einen verschlüsselbar
+13. Unbekannte zukünftige Top-Level-Typen erzeugen einen verschlüsselbar
     repräsentierbaren `unknown`-Event, ohne die Bedeutung zu erraten.
 
 ## 4. Opaque Korrelation und Datenschutz
@@ -155,7 +161,9 @@ Nach Sichtprüfung wird der Befehl ohne `--dry-run` wiederholt. Der Sanitizer:
 - pseudonymisiert IDs deterministisch;
 - ersetzt Pfade, URLs, Namen, freien Text und unbekannte Strings;
 - redigiert secretartige Schlüssel;
-- schreibt atomar mit privaten Rechten;
+- führt mit `--dry-run` keinerlei Schreiboperation aus und legt insbesondere
+  weder Zielverzeichnis, Zieldatei noch Manifest an;
+- schreibt im echten Lauf atomar mit privaten Rechten;
 - speichert im Manifest ausschließlich Hashreferenzen, Zeilenzahl,
   Schemaversion und Upstreamcommit.
 
@@ -167,13 +175,13 @@ das Repository gelangen.
 ```python
 from history_dispatcher.classification import CodexRolloutClassifier
 
-report = CodexRolloutClassifier().classify_lines(
+report = CodexRolloutClassifier(max_issues=256).classify_lines(
     rollout_file,
     source_quiescent=False,
 )
 ```
 
-`ClassificationReport` enthält immutable `events`, bounded `issues`,
+`ClassificationReport` enthält immutable `events`, hart begrenzte `issues`,
 `records_seen`, `records_ignored` und `unknown_records`. Der Classifier führt
 keine I/O-, Datenbank-, Cursor-, Dispatch- oder Netzwerkoperation aus.
 
