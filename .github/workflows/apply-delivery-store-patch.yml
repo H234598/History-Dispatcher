@@ -1,9 +1,7 @@
 name: apply-delivery-store-patch
 
 on:
-  push:
-    branches:
-      - codex/route-planner-deliveries
+  pull_request:
     paths:
       - scripts/_patch_delivery_store_once.py
       - .github/workflows/apply-delivery-store-patch.yml
@@ -13,12 +11,13 @@ permissions:
 
 jobs:
   apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: codex/route-planner-deliveries
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -33,4 +32,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add history_dispatcher/delivery_store.py
           git commit -m "fix: harden delivery store retries"
-          git push origin HEAD:codex/route-planner-deliveries
+          git push origin HEAD:${{ github.head_ref }}
