@@ -90,11 +90,17 @@ def test_control_service_is_local_unix_socket_with_peer_credentials(tmp_path: Pa
     thread = threading.Thread(target=control.start, daemon=True)
     thread.start()
     try:
+        mode = 0
         for _ in range(200):
-            if service.config.socket_path.exists():
+            try:
+                candidate = service.config.socket_path.stat().st_mode
+            except FileNotFoundError:
+                time.sleep(0.01)
+                continue
+            if stat.S_ISSOCK(candidate) and stat.S_IMODE(candidate) == 0o600:
+                mode = candidate
                 break
             time.sleep(0.01)
-        mode = service.config.socket_path.stat().st_mode
         assert stat.S_ISSOCK(mode)
         assert stat.S_IMODE(mode) == 0o600
         response = call_socket(

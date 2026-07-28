@@ -1,0 +1,2 @@
+{"timestamp":"2026-07-28T10:00:00Z","type":"session_meta","payload":{"session_id":"malformed-session","id":"malformed-thread","cwd":"fixture-projects/malformed","source":"cli"}}
+{"timestamp":"2026-07-28T10:00:01Z","type":"response_item","payload":

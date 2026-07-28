@@ -1,0 +1,74 @@
+{
+  "classification_schema_version": 1,
+  "files": [
+    {
+      "expected_history_kinds": [
+        "unknown"
+      ],
+      "expected_issue_codes": [],
+      "line_count": 2,
+      "path": "current-main/future-type.jsonl",
+      "sha256": "b56c571348114b8d13f0078fdc49172e04c1175bb8b417bb27d85aa422e44326"
+    },
+    {
+      "expected_history_kinds": [
+        "task_completion",
+        "task_completion"
+      ],
+      "expected_issue_codes": [],
+      "line_count": 7,
+      "path": "current-main/multi-turn.jsonl",
+      "sha256": "d9ca09253af72a93af8169317fb32a24347b3d1f614a2e050ed2c497dcaad24f"
+    },
+    {
+      "expected_history_kinds": [
+        "task_completion"
+      ],
+      "expected_issue_codes": [],
+      "line_count": 4,
+      "path": "current-main/phase-missing-complete.jsonl",
+      "sha256": "c47c723a0882564f9b500270f04db33f6888562393ffa7e7e0fc2d91f43c3af6"
+    },
+    {
+      "expected_history_kinds": [
+        "intermediate_update",
+        "task_completion"
+      ],
+      "expected_issue_codes": [],
+      "line_count": 6,
+      "path": "current-main/root-turn.jsonl",
+      "sha256": "474ea71fab254a78194f4f846849889d4afbbed809018af8779d3f321a710e55"
+    },
+    {
+      "expected_history_kinds": [
+        "task_completion"
+      ],
+      "expected_issue_codes": [],
+      "line_count": 2,
+      "path": "legacy/final-event.jsonl",
+      "sha256": "8754163057efe39dde456ad5f0cad49843604e60d891b10f47a8d321654b00c4"
+    },
+    {
+      "expected_history_kinds": [],
+      "expected_issue_codes": [
+        "invalid_json"
+      ],
+      "line_count": 2,
+      "path": "malformed/invalid-json.jsonl",
+      "sha256": "e7a92d40cfc0f8cb57596b5143da98ffcafb2fe70b79e4c447a6ba76970fa957"
+    },
+    {
+      "expected_history_kinds": [
+        "intermediate_update",
+        "subagent_completion"
+      ],
+      "expected_issue_codes": [],
+      "line_count": 7,
+      "path": "subagents/subagent-late.jsonl",
+      "sha256": "cbfe0a098ad94dd287d72334acb3a4c21b4a626c1c581661651bfa20389c8c08"
+    }
+  ],
+  "sanitizer_schema_version": 1,
+  "upstream_commit": "8e271dc02b23d42827875019924be0f5005642b0",
+  "upstream_repository": "openai/codex"
+}
