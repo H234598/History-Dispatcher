@@ -1,27 +1,16 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
-import pytest
-
 from history_dispatcher.classification import (
-    CLASSIFICATION_SCHEMA_VERSION,
-    AgentContext,
     ClassificationConfidence,
+    ClassificationReport,
     CodexRolloutClassifier,
     HistoryKind,
 )
-from history_dispatcher.redaction import redact_text, visible_output_text
-
-
-FIXTURES = Path(__file__).parent / "fixtures" / "codex"
-
-
-def _classify(relative: str, **kwargs: object):
-    path = FIXTURES / relative
-    classifier = CodexRolloutClassifier(max_jsonl_line_bytes=16 * 1024)
-    return classifier.classify_lines(path.read_bytes().splitlines(), **kwargs)
+from history_dispatcher.redaction import redact_text
 
 
 def test_reasoning_tool_system_developer_and_user_items_are_excluded() -> None:
@@ -139,17 +128,23 @@ def test_quiescent_fallback_is_explicit_and_never_automatic() -> None:
     assert report.events[0].reason_code == "quiescent_final_answer"
 
 
-def test_duplicate_rollout_rows_produce_one_event() -> None:
-    lines = (FIXTURES / "current-main/root-turn.jsonl").read_text(encoding="utf-8").splitlines()
+def test_duplicate_rollout_rows_produce_one_event(codex_fixture_root: Path) -> None:
+    lines = (codex_fixture_root / "current-main/root-turn.jsonl").read_text(
+        encoding="utf-8"
+    ).splitlines()
     lines.append(lines[-1])
 
     report = CodexRolloutClassifier().classify_lines(lines)
 
-    assert [event.history_kind for event in report.events].count(HistoryKind.TASK_COMPLETION) == 1
+    assert [event.history_kind for event in report.events].count(
+        HistoryKind.TASK_COMPLETION
+    ) == 1
 
 
-def test_public_event_view_contains_no_raw_session_turn_parent_or_path() -> None:
-    report = _classify("subagents/subagent-late.jsonl")
+def test_public_event_view_contains_no_raw_session_turn_parent_or_path(
+    classify_fixture: Callable[..., ClassificationReport],
+) -> None:
+    report = classify_fixture("subagents/subagent-late.jsonl")
     serialized = json.dumps(report.as_dict(), ensure_ascii=False, sort_keys=True)
 
     for forbidden in (
@@ -189,16 +184,26 @@ def test_redaction_removes_tokens_private_paths_credentials_and_email() -> None:
     assert "[redacted-email]" in redacted
 
 
-def test_completion_text_mismatch_is_visible_as_bounded_issue() -> None:
-    lines = (FIXTURES / "current-main/root-turn.jsonl").read_text(encoding="utf-8").splitlines()
+def test_completion_text_mismatch_fails_closed_and_keeps_validated_text(
+    codex_fixture_root: Path,
+) -> None:
+    lines = (codex_fixture_root / "current-main/root-turn.jsonl").read_text(
+        encoding="utf-8"
+    ).splitlines()
     completion = json.loads(lines[-1])
-    completion["payload"]["last_agent_message"] = "A different final text"
+    completion["payload"]["last_agent_message"] = "A crafted different final text"
     lines[-1] = json.dumps(completion)
 
     report = CodexRolloutClassifier().classify_lines(lines)
 
     assert [issue.code for issue in report.issues] == ["completion_text_mismatch"]
-    assert report.events[-1].text == "A different final text"
+    event = report.events[-1]
+    assert event.history_kind is HistoryKind.UNKNOWN
+    assert event.confidence is ClassificationConfidence.AMBIGUOUS
+    assert event.external_dispatchable is False
+    assert event.reason_code == "completion_text_mismatch"
+    assert event.text == "Die Aufgabe ist vollständig abgeschlossen."
+    assert "crafted" not in event.text
 
 
 def test_completion_without_session_context_is_unknown_and_fail_closed() -> None:
