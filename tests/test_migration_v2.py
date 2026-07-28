@@ -183,10 +183,12 @@ def test_v2_migration_is_additive_encrypted_and_never_creates_retryable_targets(
     assert stat.S_IMODE(backup_path.stat().st_mode) == 0o600
     assert stat.S_IMODE(store.database_path.stat().st_mode) == 0o600
     assert report.backup.sha256
+    assert list(backup_dir.iterdir()) == [backup_path]
 
     verification = verify_database_v2(store.database_path)
     assert verification["ok"] is True
     assert verification["history_items"] == verification["history_events"] == 3
+    assert verification["migrated_legacy_events"] == 3
     assert set(V2_TABLES) <= _table_names(store.database_path)
     assert _schema_versions(store.database_path) == [1, 2]
 
@@ -365,7 +367,9 @@ def test_v2_migration_rolls_back_schema_and_rows_on_injected_failure(
 
     assert _schema_versions(store.database_path) == [1]
     assert "history_events" not in _table_names(store.database_path)
-    assert len(list(backup_dir.iterdir())) == 1
+    backups = list(backup_dir.iterdir())
+    assert len(backups) == 1
+    assert backups[0].suffix == ".sqlite3"
     with sqlite3.connect(store.database_path) as db:
         assert db.execute("PRAGMA quick_check").fetchone()[0] == "ok"
         assert db.execute("SELECT COUNT(*) FROM history_items").fetchone()[0] == 3
@@ -396,9 +400,7 @@ def test_v2_migration_refuses_active_v1_claim_before_backup(tmp_path: Path) -> N
     assert _schema_versions(store.database_path) == [1]
 
 
-def test_wrong_key_rolls_back_v2_schema_and_keeps_preflight_backup(
-    tmp_path: Path,
-) -> None:
+def test_wrong_key_fails_before_any_backup_or_schema_write(tmp_path: Path) -> None:
     store = _store(tmp_path, key=b"k" * 32)
     _seed_legacy_rows(store)
     backup_dir = tmp_path / "backups"
@@ -409,12 +411,12 @@ def test_wrong_key_rolls_back_v2_schema_and_keeps_preflight_backup(
         minimum_free_bytes=0,
     )
 
-    with pytest.raises(MigrationV2Error, match="rolled back"):
+    with pytest.raises(MigrationV2Error, match="cannot be verified"):
         migrator.migrate()
 
     assert _schema_versions(store.database_path) == [1]
     assert "history_events" not in _table_names(store.database_path)
-    assert len(list(backup_dir.iterdir())) == 1
+    assert backup_dir.exists() is False
 
 
 def test_preflight_backup_can_restore_original_v1_database(tmp_path: Path) -> None:
@@ -443,6 +445,8 @@ def test_preflight_backup_can_restore_original_v1_database(tmp_path: Path) -> No
     assert stat.S_IMODE(restored_path.stat().st_mode) == 0o600
     assert _schema_versions(restored_path) == [1]
     assert "history_events" not in _table_names(restored_path)
+    assert not Path(f"{restored_path}-wal").exists()
+    assert not Path(f"{restored_path}-shm").exists()
     with sqlite3.connect(restored_path) as db:
         assert db.execute("SELECT COUNT(*) FROM history_items").fetchone()[0] == 3
         assert db.execute("SELECT COUNT(*) FROM recipient_results").fetchone()[0] == 3
