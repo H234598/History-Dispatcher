@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import secrets
@@ -16,6 +17,7 @@ from . import __version__
 from .config import DispatcherConfig, apply_safe_values, config_revision, load_config, public_config, write_config
 from .crypto import SecretServiceKeyProvider
 from .protocol import ProtocolError, encode_message, read_message
+from .idempotency import IdempotencyConflict, IdempotencyInProgress, IdempotencyStore
 from .store import DispatcherStore
 
 
@@ -23,7 +25,7 @@ OPERATIONS = (
     "protocol.describe", "health.get", "status.get", "report.get",
     "history.append", "history.query",
     "dispatch.claim", "dispatch.complete", "dispatch.retry",
-   "delivery.record", "config.get", "config.validate", "config.apply",
+    "delivery.record", "config.get", "config.validate", "config.apply",
     "collector.collect", "admin.preview", "admin.execute", "audit.query",
     "migration.import_legacy",
     "maintenance.prune",
@@ -39,11 +41,23 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _request_fingerprint(operation: str, body: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        {"operation": operation, "body": body},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 class DispatcherService:
     def __init__(self, config: DispatcherConfig, *, key_provider: SecretServiceKeyProvider | None = None) -> None:
         self.config = config
         self.key_provider = key_provider or SecretServiceKeyProvider()
         self.store = DispatcherStore(config.database_path, self.key_provider)
+        self.idempotency = IdempotencyStore(config.database_path)
         self._lock = threading.RLock()
         self._started_at = _timestamp()
         self._last_operation = ""
@@ -109,38 +123,90 @@ class DispatcherService:
         os.chmod(temporary, 0o600)
         os.replace(temporary, path)
 
+    @staticmethod
+    def _error(code: str, message: str) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "error": {
+                "code": str(code)[:96],
+                "message": str(message)[:500],
+            },
+        }
+
     def handle(self, request: object) -> dict[str, Any]:
         if not isinstance(request, dict):
-            return {"ok": False, "error": {"code": "invalid_request", "message": "request must be an object"}}
+            return self._error("invalid_request", "request must be an object")
+        raw_body = request.get("body", {})
+        if not isinstance(raw_body, dict):
+            return self._error("invalid_request", "body must be an object")
+        body: dict[str, Any] = raw_body
         operation = str(request.get("operation") or "").strip()
         request_id = str(request.get("request_id") or "").strip()
-        body = request.get("body") if isinstance(request.get("body"), dict) else {}
         if int(request.get("protocol_version", 0) or 0) != 1:
-            return {"ok": False, "error": {"code": "unsupported_protocol", "message": "protocol_version must be 1"}}
+            return self._error("unsupported_protocol", "protocol_version must be 1")
         if operation not in OPERATIONS:
-            return {"ok": False, "error": {"code": "unknown_operation", "message": "unknown operation"}}
+            return self._error("unknown_operation", "unknown operation")
+
+        fingerprint = ""
+        reservation_active = False
         if operation in IDEMPOTENT_OPERATIONS and request_id:
             if len(request_id) > 128 or any(ord(char) < 0x20 for char in request_id):
-                return {"ok": False, "error": {"code": "invalid_request_id", "message": "request_id is invalid"}}
-            cached = self.store.get_idempotent_response(request_id, operation)
+                return self._error("invalid_request_id", "request_id is invalid")
+            try:
+                fingerprint = _request_fingerprint(operation, body)
+            except (TypeError, ValueError):
+                return self._error("invalid_request", "body must contain finite JSON values")
+            try:
+                cached = self.idempotency.begin(request_id, operation, fingerprint)
+            except IdempotencyConflict:
+                return self._error(
+                    "idempotency_conflict",
+                    "request_id was already used with a different operation or body",
+                )
+            except IdempotencyInProgress:
+                return self._error(
+                    "idempotency_in_progress",
+                    "request_id is already being processed or has an unknown outcome",
+                )
             if cached is not None:
                 return cached
+            reservation_active = True
+
         try:
             result = self._dispatch(operation, body)
             with self._lock:
                 self._last_operation = operation
                 self._last_error = ""
                 self._write_snapshot()
-            response = {"ok": True, "data": result}
-            if operation in IDEMPOTENT_OPERATIONS and request_id:
-                self.store.save_idempotent_response(request_id, operation, response)
-            return response
+            response: dict[str, Any] = {"ok": True, "data": result}
         except Exception as exc:  # API boundary: never expose internal traceback.
             with self._lock:
                 self._last_operation = operation
                 self._last_error = f"{type(exc).__name__}: {str(exc)[:240]}"
-                self._write_snapshot()
-            return {"ok": False, "error": {"code": "operation_failed", "message": str(exc)[:500]}}
+                try:
+                    self._write_snapshot()
+                except Exception:
+                    # A failed status refresh must not expose an internal traceback or
+                    # overwrite the operation's bounded error response.
+                    pass
+            response = self._error("operation_failed", str(exc))
+
+        if reservation_active:
+            try:
+                self.idempotency.complete(request_id, operation, fingerprint, response)
+            except IdempotencyConflict:
+                return self._error(
+                    "idempotency_conflict",
+                    "request_id was already used with a different operation or body",
+                )
+            except Exception:
+                # The mutation may already have happened. Keep the reservation in
+                # its pending state so a retry cannot blindly execute it again.
+                return self._error(
+                    "idempotency_persist_failed",
+                    "operation completed but its idempotency result could not be persisted",
+                )
+        return response
 
     def _dispatch(self, operation: str, body: dict[str, Any]) -> dict[str, Any]:
         if operation == "protocol.describe":
@@ -204,7 +270,14 @@ class DispatcherService:
             path = Path(str(body.get("path") or "")).expanduser()
             return migrate_legacy_jsonl(path, self.store, dry_run=bool(body.get("dry_run")))
         if operation == "maintenance.prune":
-            return self.store.prune(completed_days=self.config.completed_retention_days, audit_days=self.config.audit_retention_days)
+            result = self.store.prune(
+                completed_days=self.config.completed_retention_days,
+                audit_days=self.config.audit_retention_days,
+            )
+            result["idempotency_deleted"] = self.idempotency.prune(
+                retention_days=self.config.audit_retention_days
+            )
+            return result
         if operation == "admin.preview":
             ids = body.get("ids", [])
             if not isinstance(ids, list):
