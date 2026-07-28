@@ -1,27 +1,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
-import pytest
 
 from history_dispatcher.classification import (
-    CLASSIFICATION_SCHEMA_VERSION,
     AgentContext,
     ClassificationConfidence,
     CodexRolloutClassifier,
     HistoryKind,
 )
-from history_dispatcher.redaction import redact_text, visible_output_text
-
-
-FIXTURES = Path(__file__).parent / "fixtures" / "codex"
-
-
-def _classify(relative: str, **kwargs: object):
-    path = FIXTURES / relative
-    classifier = CodexRolloutClassifier(max_jsonl_line_bytes=16 * 1024)
-    return classifier.classify_lines(path.read_bytes().splitlines(), **kwargs)
 
 
 def test_internal_session_source_is_not_misclassified_as_root_completion() -> None:
@@ -368,9 +354,7 @@ def test_oversized_invalid_utf8_line_is_rejected_before_decode() -> None:
 
 
 def test_issue_collection_is_bounded_and_reports_overflow() -> None:
-    report = CodexRolloutClassifier(max_issues=2).classify_lines(
-        ['{"type":'] * 5
-    )
+    report = CodexRolloutClassifier(max_issues=2).classify_lines(['{"type":'] * 5)
 
     assert [issue.code for issue in report.issues] == [
         "invalid_json",
@@ -469,3 +453,148 @@ def test_quiescent_completion_without_turn_context_is_not_external_dispatchable(
     assert report.events[0].confidence is ClassificationConfidence.COMPATIBLE
     assert report.events[0].turn_key == "turn_unknown"
     assert report.events[0].external_dispatchable is False
+
+
+def test_deeply_nested_source_metadata_is_fail_closed_without_recursion_error() -> None:
+    source: object = "cli"
+    for _ in range(100):
+        source = {"nested": source}
+    lines = [
+        json.dumps(
+            {
+                "timestamp": "2026-07-28T23:20:00Z",
+                "ordinal": 0,
+                "type": "session_meta",
+                "payload": {
+                    "session_id": "session-deep-source",
+                    "id": "thread-deep-source",
+                    "cwd": "fixture-projects/deep-source",
+                    "source": source,
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "timestamp": "2026-07-28T23:20:01Z",
+                "ordinal": 1,
+                "type": "event_msg",
+                "payload": {
+                    "type": "turn_complete",
+                    "turn_id": "turn-deep-source",
+                    "last_agent_message": "Deep source result",
+                },
+            }
+        ),
+    ]
+
+    report = CodexRolloutClassifier().classify_lines(lines)
+
+    assert report.issues == ()
+    assert report.events[0].agent_context is AgentContext.UNKNOWN
+    assert report.events[0].history_kind is HistoryKind.UNKNOWN
+    assert report.events[0].external_dispatchable is False
+
+
+def test_explicit_completion_turn_does_not_reuse_another_turn_candidate() -> None:
+    lines = [
+        json.dumps(
+            {
+                "timestamp": "2026-07-28T23:30:00Z",
+                "ordinal": 0,
+                "type": "session_meta",
+                "payload": {
+                    "session_id": "session-cross-turn",
+                    "id": "thread-cross-turn",
+                    "cwd": "fixture-projects/cross-turn",
+                    "source": "cli",
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "timestamp": "2026-07-28T23:30:01Z",
+                "ordinal": 1,
+                "type": "response_item",
+                "payload": {
+                    "id": "response-turn-a",
+                    "type": "message",
+                    "role": "assistant",
+                    "phase": "final_answer",
+                    "turn_id": "turn-a",
+                    "content": [{"type": "output_text", "text": "Result A"}],
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "timestamp": "2026-07-28T23:30:02Z",
+                "ordinal": 2,
+                "type": "event_msg",
+                "payload": {
+                    "type": "turn_complete",
+                    "turn_id": "turn-b",
+                    "last_agent_message": "Result B",
+                },
+            }
+        ),
+    ]
+
+    report = CodexRolloutClassifier().classify_lines(lines)
+
+    assert len(report.events) == 1
+    assert report.events[0].text == "Result B"
+    assert report.events[0].confidence is ClassificationConfidence.COMPATIBLE
+    assert "Result A" not in report.events[0].text
+
+
+def test_quiescent_candidates_are_emitted_in_source_ordinal_order() -> None:
+    lines = [
+        json.dumps(
+            {
+                "timestamp": "2026-07-28T23:40:00Z",
+                "ordinal": 0,
+                "type": "session_meta",
+                "payload": {
+                    "session_id": "session-order",
+                    "id": "thread-order",
+                    "cwd": "fixture-projects/order",
+                    "source": "cli",
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "timestamp": "2026-07-28T23:40:05Z",
+                "ordinal": 5,
+                "type": "response_item",
+                "payload": {
+                    "id": "response-five",
+                    "type": "message",
+                    "role": "assistant",
+                    "phase": "final_answer",
+                    "turn_id": "turn-five",
+                    "content": [{"type": "output_text", "text": "Five"}],
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "timestamp": "2026-07-28T23:40:02Z",
+                "ordinal": 2,
+                "type": "response_item",
+                "payload": {
+                    "id": "response-two",
+                    "type": "message",
+                    "role": "assistant",
+                    "phase": "final_answer",
+                    "turn_id": "turn-two",
+                    "content": [{"type": "output_text", "text": "Two"}],
+                },
+            }
+        ),
+    ]
+
+    report = CodexRolloutClassifier().classify_lines(lines, source_quiescent=True)
+
+    assert [event.source_ordinal for event in report.events] == [2, 5]
+    assert [event.text for event in report.events] == ["Two", "Five"]
