@@ -1,0 +1,2 @@
+{"timestamp":"2025-12-01T10:00:00Z","type":"session_meta","payload":{"session_id":"legacy-session-0001","id":"legacy-thread-0001","timestamp":"2025-12-01T10:00:00Z","cwd":"fixture-projects/legacy-project","originator":"fixture","cli_version":"legacy-fixture","source":"cli"}}
+{"timestamp":"2025-12-01T10:00:01Z","type":"event","payload":{"role":"assistant","phase":"final","turn_id":"legacy-turn-0001","content":"Legacy-Abschluss bleibt intern und wird nicht automatisch extern versandt."}}

@@ -15,6 +15,8 @@ applet expansion are documented in:
 - [`docs/contracts/`](docs/contracts/) — frozen control, status and security
   contracts;
 - [`docs/adr/`](docs/adr/) — ADR-001 through ADR-016;
+- [`docs/history-classification.md`](docs/history-classification.md) — the pure,
+  versioned Codex rollout classifier, redaction and fixture contract;
 - [`docs/implementation-progress.md`](docs/implementation-progress.md) — the
   sequential implementation status;
 - [`docs/reuse-ledger.md`](docs/reuse-ledger.md) — source, licence and parity
@@ -33,6 +35,23 @@ The production key is resolved with:
 
 The value must decode to exactly 32 bytes. Tests inject a static key and never
 touch the production Secret Service.
+
+### Codex classification fixtures
+
+Never commit a raw Codex rollout. A local example must first pass through the
+deterministic, streaming sanitizer:
+
+    python scripts/sanitize_codex_fixture.py \
+      /private/path/rollout.jsonl \
+      /tmp/sanitized-rollout.jsonl \
+      --manifest /tmp/sanitized-manifest.json \
+      --upstream-commit 8e271dc02b23d42827875019924be0f5005642b0 \
+      --dry-run
+
+Inspect the dry-run metadata, then repeat without `--dry-run`. The checked-in
+fixture corpus and its hash manifest live below `tests/fixtures/codex/`.
+The classifier introduced with that corpus is currently a pure API and is not
+yet wired into the production collector or database schema.
 
 ## Runtime layout
 
