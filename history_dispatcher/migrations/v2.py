@@ -10,6 +10,7 @@ import tempfile
 import uuid
 from collections import defaultdict
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -34,6 +35,12 @@ from ..schema_v2 import (
 MINIMUM_FREE_BYTES = 256 * 1024 * 1024
 _SUCCESS_RECIPIENT_STATES = frozenset({"accepted", "delivered", "acknowledged"})
 _SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
+_REQUIRED_V1_TABLES = (
+    "schema_migrations",
+    "history_items",
+    "recipient_results",
+    "dispatch_claims",
+)
 
 
 class MigrationV2Error(RuntimeError):
@@ -54,17 +61,21 @@ def _canonical_json(value: object) -> str:
     )
 
 
-def _connect(path: Path) -> sqlite3.Connection:
+@contextmanager
+def _connect(path: Path) -> Iterator[sqlite3.Connection]:
     connection = sqlite3.connect(
         path,
         timeout=30,
         isolation_level=None,
         check_same_thread=False,
     )
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys=ON")
-    connection.execute("PRAGMA busy_timeout=30000")
-    return connection
+    try:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA busy_timeout=30000")
+        yield connection
+    finally:
+        connection.close()
 
 
 def _iter_sql_statements(script: str) -> Iterator[str]:
@@ -114,10 +125,10 @@ def _foreign_key_violations(db: sqlite3.Connection) -> tuple[str, ...]:
 
 def _assert_no_symlink_chain(path: Path, *, allow_missing_leaf: bool = False) -> None:
     current = path.expanduser().absolute()
-    if allow_missing_leaf and not current.exists() and not current.is_symlink():
+    if allow_missing_leaf and not os.path.lexists(current):
         current = current.parent
     while True:
-        if current.is_symlink():
+        if os.path.islink(current):
             raise MigrationV2Error(
                 f"symlink path component is not allowed: {current}"
             )
@@ -139,6 +150,43 @@ def _assert_regular_owned_database(path: Path) -> os.stat_result:
     return info
 
 
+def _prepare_private_directory(path: Path, *, label: str) -> None:
+    _assert_no_symlink_chain(path, allow_missing_leaf=True)
+    if os.path.islink(path):
+        raise MigrationV2Error(f"{label} must not be a symlink")
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as exc:
+        raise MigrationV2Error(f"{label} is not usable") from exc
+    _assert_no_symlink_chain(path)
+    try:
+        info = os.lstat(path)
+    except OSError as exc:
+        raise MigrationV2Error(f"{label} is unavailable") from exc
+    if not stat.S_ISDIR(info.st_mode):
+        raise MigrationV2Error(f"{label} must be a directory")
+    if hasattr(os, "getuid") and info.st_uid != os.getuid():
+        raise MigrationV2Error(f"{label} must be owned by the current user")
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except OSError as exc:
+        raise MigrationV2Error(f"{label} cannot be opened safely") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened.st_mode):
+            raise MigrationV2Error(f"{label} must be a directory")
+        if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+            raise MigrationV2Error(f"{label} changed during validation")
+        os.fchmod(descriptor, 0o700)
+    finally:
+        os.close(descriptor)
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -148,7 +196,12 @@ def _sha256_file(path: Path) -> str:
 
 
 def _fsync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    descriptor = os.open(
+        path,
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0),
+    )
     try:
         os.fsync(descriptor)
     finally:
@@ -161,6 +214,25 @@ def _remove_sqlite_sidecars(path: Path) -> None:
             Path(f"{path}{suffix}").unlink()
         except FileNotFoundError:
             pass
+
+
+def _active_claim_count(db: sqlite3.Connection) -> int:
+    if not _table_exists(db, "dispatch_claims"):
+        return 0
+    return int(
+        db.execute(
+            "SELECT COUNT(*) FROM dispatch_claims WHERE expires_at > ?",
+            (_now(),),
+        ).fetchone()[0]
+    )
+
+
+def _require_v1_tables(db: sqlite3.Connection) -> None:
+    missing = tuple(table for table in _REQUIRED_V1_TABLES if not _table_exists(db, table))
+    if missing:
+        raise MigrationV2Error(
+            "database is missing required v1 table(s): " + ", ".join(missing)
+        )
 
 
 @dataclass(frozen=True)
@@ -295,34 +367,25 @@ class DatabaseV2Migrator:
     def preflight(self) -> PreflightReport:
         info = _assert_regular_owned_database(self.database_path)
         _assert_no_symlink_chain(self.database_path.parent)
+        _assert_no_symlink_chain(self.backup_dir, allow_missing_leaf=True)
         self.key_provider.get_key()
         disk = shutil.disk_usage(self.database_path.parent)
         required_free = max(self.minimum_free_bytes, int(info.st_size) * 2)
         with _connect(self.database_path) as db:
+            _require_v1_tables(db)
             versions = _schema_versions(db)
-            if versions and max(versions) > DB_SCHEMA_VERSION:
+            if not versions:
+                raise MigrationV2Error("database has no recorded schema version")
+            if max(versions) > DB_SCHEMA_VERSION:
                 raise MigrationV2Error("database schema is newer than this migrator")
             quick = _quick_check(db)
             foreign_keys = _foreign_key_violations(db)
-            active_claims = (
-                int(
-                    db.execute(
-                        "SELECT COUNT(*) FROM dispatch_claims WHERE expires_at > ?",
-                        (_now(),),
-                    ).fetchone()[0]
-                )
-                if _table_exists(db, "dispatch_claims")
-                else 0
+            active_claims = _active_claim_count(db)
+            history_items = int(
+                db.execute("SELECT COUNT(*) FROM history_items").fetchone()[0]
             )
-            history_items = (
-                int(db.execute("SELECT COUNT(*) FROM history_items").fetchone()[0])
-                if _table_exists(db, "history_items")
-                else 0
-            )
-            recipient_results = (
-                int(db.execute("SELECT COUNT(*) FROM recipient_results").fetchone()[0])
-                if _table_exists(db, "recipient_results")
-                else 0
+            recipient_results = int(
+                db.execute("SELECT COUNT(*) FROM recipient_results").fetchone()[0]
             )
         if quick != "ok":
             raise MigrationV2Error("database quick_check failed")
@@ -346,7 +409,7 @@ class DatabaseV2Migrator:
 
     def migrate(self, *, dry_run: bool = False) -> MigrationV2Report:
         preflight = self.preflight()
-        source_version = max(preflight.schema_versions or (0,))
+        source_version = max(preflight.schema_versions)
         if not preflight.migration_required:
             verification = verify_database_v2(self.database_path)
             return MigrationV2Report(
@@ -404,6 +467,10 @@ class DatabaseV2Migrator:
         with _connect(self.database_path) as db:
             try:
                 db.execute("BEGIN IMMEDIATE")
+                if _active_claim_count(db):
+                    raise MigrationV2Error(
+                        "active v1 dispatch claims must expire or be released"
+                    )
                 for statement in _iter_sql_statements(V2_DDL):
                     db.execute(statement)
                 self._fault("after_schema")
@@ -447,6 +514,9 @@ class DatabaseV2Migrator:
                 db.execute(f"PRAGMA user_version={DB_SCHEMA_VERSION}")
                 self._fault("before_commit")
                 db.commit()
+            except MigrationV2Error:
+                db.rollback()
+                raise
             except Exception as exc:
                 db.rollback()
                 raise MigrationV2Error(
@@ -485,8 +555,7 @@ class DatabaseV2Migrator:
     def _plan_mapping_counts(self) -> dict[str, int]:
         counts: dict[str, int] = defaultdict(int)
         with _connect(self.database_path) as db:
-            if not _table_exists(db, "history_items"):
-                return counts
+            _require_v1_tables(db)
             for row in db.execute(
                 "SELECT * FROM history_items ORDER BY created_at, id"
             ):
@@ -494,15 +563,11 @@ class DatabaseV2Migrator:
                 mapping = self._map_legacy_row(row, payload)
                 counts[f"kind:{mapping.history_kind}"] += 1
                 counts[f"confidence:{mapping.confidence}"] += 1
-                counts[f"legacy_status:{str(row['status'])}"] += 1
+                counts[f"legacy_status:{row['status']!s}"] += 1
         return counts
 
     def _create_backup(self) -> BackupReport:
-        _assert_no_symlink_chain(self.backup_dir, allow_missing_leaf=True)
-        self.backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if self.backup_dir.is_symlink():
-            raise MigrationV2Error("backup directory must not be a symlink")
-        os.chmod(self.backup_dir, 0o700)
+        _prepare_private_directory(self.backup_dir, label="backup directory")
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         name = (
             f"{self.database_path.stem}-v1-before-v2-{stamp}-"
@@ -532,6 +597,7 @@ class DatabaseV2Migrator:
             with temporary.open("rb+") as handle:
                 os.fsync(handle.fileno())
             os.chmod(temporary, 0o600)
+            _assert_no_symlink_chain(self.backup_dir)
             os.replace(temporary, target)
             _remove_sqlite_sidecars(temporary)
             _remove_sqlite_sidecars(target)
@@ -669,6 +735,7 @@ class DatabaseV2Migrator:
         db: sqlite3.Connection,
         mapping_counts: dict[str, int],
     ) -> _MigrationCounts:
+        _require_v1_tables(db)
         counts = _MigrationCounts()
         rows = db.execute(
             "SELECT * FROM history_items ORDER BY created_at, id"
@@ -717,7 +784,7 @@ class DatabaseV2Migrator:
             )
             mapping_counts[f"kind:{mapping.history_kind}"] += 1
             mapping_counts[f"confidence:{mapping.confidence}"] += 1
-            mapping_counts[f"legacy_status:{str(row['status'])}"] += 1
+            mapping_counts[f"legacy_status:{row['status']!s}"] += 1
             recipient_rows = db.execute(
                 "SELECT * FROM recipient_results WHERE item_id=? "
                 "ORDER BY recipient_id",
@@ -1067,6 +1134,51 @@ def verify_database_v2(database_path: Path) -> dict[str, Any]:
     }
 
 
+def _copy_verified_backup_to_staging(
+    backup: Path,
+    destination_directory: Path,
+) -> tuple[Path, str]:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        source_descriptor = os.open(backup, flags)
+    except OSError as exc:
+        raise MigrationV2Error("backup cannot be opened safely") from exc
+    staging: Path | None = None
+    try:
+        source_info = os.fstat(source_descriptor)
+        if not stat.S_ISREG(source_info.st_mode):
+            raise MigrationV2Error("backup must be a regular file")
+        if hasattr(os, "getuid") and source_info.st_uid != os.getuid():
+            raise MigrationV2Error("backup must be owned by the current user")
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".history-dispatcher-backup-",
+            suffix=".verified.sqlite3",
+            dir=destination_directory,
+        )
+        staging = Path(temporary_name)
+        digest = hashlib.sha256()
+        with os.fdopen(descriptor, "wb") as target, os.fdopen(
+            os.dup(source_descriptor),
+            "rb",
+        ) as source:
+            for block in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(block)
+                target.write(block)
+            target.flush()
+            os.fsync(target.fileno())
+        os.chmod(staging, 0o600)
+        return staging, digest.hexdigest()
+    except Exception:
+        if staging is not None:
+            try:
+                staging.unlink()
+            except FileNotFoundError:
+                pass
+        raise
+    finally:
+        os.close(source_descriptor)
+
+
 def restore_database_backup(
     backup_path: Path,
     destination_path: Path,
@@ -1076,49 +1188,32 @@ def restore_database_backup(
 ) -> dict[str, Any]:
     backup = Path(backup_path).expanduser().absolute()
     destination = Path(destination_path).expanduser().absolute()
-    _assert_regular_owned_database(backup)
+    _assert_no_symlink_chain(backup)
     _assert_no_symlink_chain(destination, allow_missing_leaf=True)
-    actual_hash = _sha256_file(backup)
-    normalized_expected = str(expected_sha256).strip().lower()
-    if actual_hash != normalized_expected:
-        raise MigrationV2Error("backup hash does not match expected SHA-256")
-    if confirmation != f"RESTORE {actual_hash[:12]}":
-        raise MigrationV2Error("restore confirmation mismatch")
-    with _connect(backup) as source:
-        if _quick_check(source) != "ok":
-            raise MigrationV2Error("backup quick_check failed")
-    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    _assert_no_symlink_chain(destination.parent)
-    os.chmod(destination.parent, 0o700)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{destination.name}.",
-        suffix=".restore.tmp",
-        dir=destination.parent,
+    _prepare_private_directory(destination.parent, label="restore destination directory")
+
+    staging, actual_hash = _copy_verified_backup_to_staging(
+        backup,
+        destination.parent,
     )
-    os.close(descriptor)
-    temporary = Path(temporary_name)
+    normalized_expected = str(expected_sha256).strip().lower()
     try:
-        with _connect(backup) as source:
-            restored = sqlite3.connect(temporary)
-            try:
-                restored.execute("PRAGMA journal_mode=DELETE")
-                source.backup(restored)
-                restored.commit()
-                if _quick_check(restored) != "ok":
-                    raise MigrationV2Error(
-                        "restored database quick_check failed"
-                    )
-            finally:
-                restored.close()
-        _remove_sqlite_sidecars(temporary)
-        with temporary.open("rb+") as handle:
-            os.fsync(handle.fileno())
-        os.chmod(temporary, 0o600)
+        if actual_hash != normalized_expected:
+            raise MigrationV2Error("backup hash does not match expected SHA-256")
+        if confirmation != f"RESTORE {actual_hash[:12]}":
+            raise MigrationV2Error("restore confirmation mismatch")
+        with _connect(staging) as source:
+            if _quick_check(source) != "ok":
+                raise MigrationV2Error("backup quick_check failed")
+            if _foreign_key_violations(source):
+                raise MigrationV2Error("backup foreign_key_check failed")
+
         if destination.exists():
+            _assert_regular_owned_database(destination)
             with _connect(destination) as current:
                 current.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        os.replace(temporary, destination)
-        _remove_sqlite_sidecars(temporary)
+        _assert_no_symlink_chain(destination, allow_missing_leaf=True)
+        os.replace(staging, destination)
         _remove_sqlite_sidecars(destination)
         _fsync_directory(destination.parent)
         return {
@@ -1128,8 +1223,8 @@ def restore_database_backup(
             "quick_check": "ok",
         }
     finally:
-        _remove_sqlite_sidecars(temporary)
+        _remove_sqlite_sidecars(staging)
         try:
-            temporary.unlink()
+            staging.unlink()
         except FileNotFoundError:
             pass
