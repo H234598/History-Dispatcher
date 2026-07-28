@@ -2,9 +2,9 @@
 
 **Verbindliche Planquelle:** `HISTORY_DISPATCHER_CINNAMON_APPLET_IMPLEMENTIERUNGSPLAN`, Stand 28. Juli 2026, SHA-256 `a1f52c11117a063702f4cff008c9d24646f8f33a7540cdd1bf48ab220053ba0c`  
 **Verifizierte ursprüngliche Ausgangsbasis:** `main@8f0bb05a540942e61c979a51bbaeca32d4308eb1`  
-**Aktueller Main-Stand zu Beginn dieses Schnitts:** `4ff947aba6da390dcff7adaea41e9e4871132eef`  
-**Aktueller Umsetzungsschnitt:** `PR-HD-02-codex-fixtures-classifier`  
-**Arbeitsbranch:** `codex/codex-fixtures-classifier`
+**Aktueller Main-Stand zu Beginn dieses Schnitts:** `d6b9fccdce5d429d07e182b1fff985c0fd1c8c40`  
+**Aktueller Umsetzungsschnitt:** `PR-HD-03-db-v2-migration`  
+**Arbeitsbranch:** `codex/db-v2-migration`
 
 ## Abgeschlossener Schnitt `PR-HD-01-baseline-adrs`
 
@@ -15,87 +15,99 @@
 - [x] PR #1 per Squash mit erwarteter Head-SHA gemergt (`A-015`).
 - [x] Mergecommit auf `main`: `4ff947aba6da390dcff7adaea41e9e4871132eef`.
 
-## Status `PR-HD-02-codex-fixtures-classifier`
+## Abgeschlossener Schnitt `PR-HD-02-codex-fixtures-classifier`
 
-### Fixture-Korpus und Sanitizer (`WP-010`, `B-001` bis `B-011`)
-
-- [x] Verzeichnisse für aktuelle, Legacy-, Sub-Agent- und Malformed-Fixtures angelegt.
-- [x] aktuellen `openai/codex`-Protokollstand gegen Commit `8e271dc02b23d42827875019924be0f5005642b0` verifiziert.
-- [x] streamingbasierten Fixture-Sanitizer implementiert.
-- [x] IDs, Pfade, URLs, Namen, Text, unbekannte Felder und secretartige Schlüssel pseudonymisiert beziehungsweise redigiert.
-- [x] veröffentlichte Pseudonyme durch fixturelokale First-seen-Aliasse ersetzt; sie sind nicht aus erratbaren Klartext-Hashes abgeleitet.
-- [x] Doppelkeys, nicht endliche JSON-Werte, Nicht-Objekte, ungültiges UTF-8, Rekursion und übergroße Zeilen fail-closed behandelt.
-- [x] Zeilengrenze vor unbeschränktem Buffering und vor UTF-8-Decoding durchgesetzt.
-- [x] atomaren privaten Output und vollständig schreibfreien Dry Run implementiert.
-- [x] Fixturemanifest mit SHA-256, Zeilenzahlen, erwarteten Kinds, Confidence, Dispatchfähigkeit, Issues und Upstreamcommit erzeugt.
-- [x] Root-, phase-missing-, Multi-Turn-, Future-Type-, Sub-Agent-, Legacy- und Malformed-Fixtures aufgenommen.
-- [x] Leaktests verhindern Token-, Authorization-, Secret-Zuweisungs-, Credential-URL-, E-Mail- und Privatpfadmarker.
-
-### Classifier, Redaction und Dedupe (`WP-011`, `B-012` bis `B-024`)
-
-- [x] `HistoryKind`, Confidence, Agentkontext, Issues, Events und Report immutable typisiert.
-- [x] strikten versionierten Rollout-Envelope-Parser implementiert.
-- [x] Session-, Turn-, Parent-, Sub-Agent- und Ordinalkorrelation implementiert.
-- [x] `subagent_completion`, `intermediate_update`, `task_completion` und `unknown` implementiert.
-- [x] geerbten Sub-Agent-Präfix vor `subagent_history_start_ordinal` ausgeschlossen.
+- [x] sanitisiertes aktuelles/Legacy/Sub-Agent/Malformed-Fixture-Korpus und Manifest angelegt (`WP-010`).
+- [x] streamingbasierten, veröffentlichungssicheren Fixture-Sanitizer mit Strict-JSON, bounded Line Reads, schreibfreiem Dry Run und atomarem Output implementiert.
+- [x] `subagent_completion`, `intermediate_update`, `task_completion` und `unknown` samt Confidence, Reason-Code, Agentkontext und deterministischer Deduplizierung implementiert (`WP-011`).
 - [x] Reasoning, Tool-, User-, System-, Developer- und nicht sichtbare Contentteile ausgeschlossen.
-- [x] expliziten Quiescence-Fallback implementiert, aber nicht automatisch aktiviert.
-- [x] Legacyfallback als `legacy` und extern fail-closed implementiert.
-- [x] zentrale Text-/Token-/Credential-/Pfad-/E-Mail-Redaction und UTF-8-Bytegrenze implementiert.
-- [x] vollständige Authorization-/WWW-Authenticate-Werte und gequotete Secretwerte mit Leerzeichen redigiert.
-- [x] rohe Session-/Turn-/Parent-/Response-IDs aus der öffentlichen Eventansicht entfernt.
-- [x] stabile Event-/Dedupe-Keys implementiert und doppelte Completionzeilen dedupliziert.
-- [x] interne Sessions sowie fehlende Session-, Turn- oder Projektidentität extern fail-closed behandelt.
-- [x] explizite Turn-IDs greifen niemals auf Kandidaten eines anderen Turns zurück.
-- [x] widersprüchliche `last_agent_message`-Werte überschreiben keinen validierten sichtbaren Assistanttext und erzeugen `unknown`/nicht dispatchfähig.
-- [x] Rekursion und gespeicherte Einzelissues hart begrenzt.
-- [x] GitHub-Actions-Lauf `30357023199` auf Head `aa5bf894df07270bd900cb67ab38ccd4839861fd` vollständig grün.
+- [x] unbekannte, interne, turnlose, Legacy- und widersprüchliche Completionfälle extern fail-closed behandelt.
+- [x] Token-, Authorization-, Credential-, Secret-, E-Mail- und Privatpfad-Redaction sowie issue-/rekursions-/bytebegrenztes Parsing implementiert.
+- [x] sämtliche zehn CodeRabbit-Befunde und anwendbaren Nitpicks umgesetzt; alle Threads gelöst.
+- [x] GitHub Actions, qlty und CodeRabbit auf finalem Head `f3edb3cea06ac06332f40fced67b94e656151830` grün; CodeRabbit freigegeben.
+- [x] PR #2 per Squash mit erwarteter Head-SHA gemergt.
+- [x] Mergecommit auf `main`: `d6b9fccdce5d429d07e182b1fff985c0fd1c8c40`.
+
+## Status `PR-HD-03-db-v2-migration`
+
+### Additives Schema und persistente Identitäten (`WP-020`, vorbereitend `WP-021`)
+
+- [x] Branch vom exakten gemergten Main-Stand erstellt.
+- [x] Draft-PR #3 eröffnet.
+- [x] DB-Schema-Version 2 und Routing-Schema-Version 2 definiert.
+- [x] Tabellen `history_events`, `route_plans`, `target_deliveries`, `recipient_deliveries`, `delivery_attempts`, `local_archive_entries`, `worker_heartbeats`, `config_audit` und `migration_journal` definiert.
+- [x] v1-Tabellen und produktiven Collector-/Claimpfad unangetastet gelassen.
+- [x] immutable Eventfelder und Routepläne durch SQLite-Trigger geschützt.
+- [x] monotone Target-/Recipient-State-Machines in Python und SQLite implementiert.
+- [x] HMAC-SHA-256-basierte, namespace-getrennte persistente IDs über einen vom Secret-Service-Masterkey abgeleiteten Subkey implementiert.
+
+### Preflight, Backup, Migration und Restore
+
+- [x] Owner-, Regular-File-, Symlink-, Secret-Key-, Speicherplatz-, `quick_check`-, Foreign-Key- und Active-Claim-Preflight implementiert.
+- [x] Dry Run vollständig ohne Backup-, Verzeichnis-, Schema- oder Datenwrite implementiert.
+- [x] vor dem ersten Write jede verschlüsselte Legacy-Payload entschlüsselt und gegen ihren Hash verifiziert.
+- [x] owner-only SQLite-Online-Backup mit SHA-256 und eigenem `quick_check` implementiert.
+- [x] Backup-/Restore-Tempfiles und SQLite-Sidecars deterministisch bereinigt.
+- [x] additive DDL und Legacy-Mapping in einer `BEGIN IMMEDIATE`-Transaktion implementiert.
+- [x] Fehler-Injection nach Schema/Rows führt zu vollständigem DB-Rollback bei erhaltenem Backup.
+- [x] falscher Schlüssel und aktive v1-Claims scheitern vor jedem Backup-/Schemawrite.
+- [x] `schema_migrations=2`, `user_version=2`, Migrationjournal und Post-Commit-Verifikation implementiert.
+- [x] hash- und exakt-bestätigungsgebundenen atomaren Restore implementiert.
+
+### Konservatives Legacy-Mapping und No-Redispatch-Garantie
+
+- [x] nur explizit im verschlüsselten Payload vorhandene stabile `history_kind`-/Confidence-Werte übernommen.
+- [x] pauschale `codex_run_summary`-Bestände auf `unknown/ambiguous` statt stiller Task-Completion-Umdeutung gemappt.
+- [x] alle migrierten Events auf `legacy_hold` gesetzt.
+- [x] bestehende `accepted`/`delivered`/`acknowledged` Empfängerzustände monoton erhalten.
+- [x] partielle, fehlgeschlagene und uneindeutige Empfänger-/Zielzustände auf `legacy_hold` gesetzt.
+- [x] Recipient-, Message-Ref-, Session-, Turn-, Parent- und Projektwerte persistent HMAC-pseudonymisiert.
+- [x] verifiziert, dass Migration keine `pending`, `claimed` oder `failed_retryable` Legacy-Targetdelivery erzeugt.
+- [x] idempotenten zweiten Migrationsaufruf ohne zweites Backup implementiert.
+
+### Bedienung, Tests und Dokumentation
+
+- [x] expliziten Operatorpfad `scripts/migrate_database_v2.py` implementiert.
+- [x] `preflight`, standardmäßig schreibfreien `migrate`-Dry-Run, `verify` und `restore` implementiert.
+- [x] echten Write an `--apply --confirm MIGRATE-V2` gebunden.
+- [x] begrenzte JSON-Ausgaben ohne Payload-/Pfadleaks implementiert.
+- [x] Runbook `docs/migration-v2.md` und README-Verweis ergänzt.
+- [x] 16 fokussierte DB-v2-Tests nach Fehlerkorrektur grün.
+- [x] vollständige bestehende GitHub-Actions-Suite nach Fehlerkorrektur grün.
+- [x] temporären Diagnoseworkflow nach erfolgreicher Fehleranalyse wieder entfernt.
 
 ### Noch offen vor Merge
 
-- [x] Dateien auf den Arbeitsbranch veröffentlicht und PR #2 eröffnet.
-- [x] PR #2 aus dem Draft genommen.
-- [x] sämtliche zehn konkreten CodeRabbit-Befunde sowie die anwendbaren Nitpicks implementiert.
-- [x] GitHub Actions auf dem aktuellen Review-Fix-Head grün.
+- [ ] GitHub Actions auf dem finalen Dokumentations-/CLI-Head grün.
 - [ ] qlty auf dem finalen Head grün.
-- [ ] CodeRabbit auf dem finalen Head freigegeben; alle Threads gelöst.
-- [ ] Test-/Reviewevidenz mit endgültiger Head-SHA nachpflegen.
-- [ ] PR #2 per Squash mit erwarteter Head-SHA mergen.
+- [ ] CodeRabbit vollständig prüfen; alle neuen Threads fachlich bearbeiten und lösen.
+- [ ] PR #3 aus dem Draft nehmen.
+- [ ] finale Head-SHA und Gateevidenz in diesem Dokument nachpflegen.
+- [ ] PR #3 per Squash mit erwarteter Head-SHA mergen.
 
 ## Bewusste Schnittgrenze
 
-Der produktive Collector, Source-Cursor, Store, das DB-Schema und Routing werden
-in diesem PR **nicht** umgestellt. Dadurch bleibt der bestehende
-`codex_run_summary`-Produktionspfad bis zum eigenen Integrations-/Migrations-PR
-unverändert.
+Schema v2 wird weder beim Dienststart noch beim normalen Storekonstruktor
+automatisch aktiviert. Der produktive v1-Collector und globale v1-Claimvertrag
+bleiben bis zu den folgenden Store-/Collector-Schnitten unverändert.
 
-Die stabilen öffentlichen Korrelationswerte dieses isolierten Classifiers sind
-Pseudonyme, keine Anonymitätsgrenze. Vor einer externen v2-Auslieferung bindet
-der DB-v2-/Integrationsschnitt Projekt-, Session-, Turn- und Parent-IDs an einen
-lokal persistenten Secret-Service-Schlüssel. Der aktuelle PR führt bewusst noch
-keinen persistenten Secretzugriff in den reinen Classifier ein.
+Migrierte Altbestände sind intern sichtbar und auditierbar, aber durch
+`legacy_hold` nicht extern retrybar. Es findet weder Replan noch Backfill statt.
 
 ## Nächster Schnitt nach grünem Merge
 
-`PR-HD-03-db-v2-migration` gemäß der verbindlichen PR-Reihenfolge und `WP-020`
-mit vorbereitendem Anteil aus `WP-021`:
+Der nächste sequenzielle Schnitt vervollständigt den v2-Storevertrag aus
+`WP-021`:
 
-1. additive Tabellen für `history_events`, `route_plans`,
-   `target_deliveries`, `recipient_deliveries`, `delivery_attempts`,
-   `local_archive_entries`, Heartbeats, Config-Audit und Migrationsjournal
-   definieren;
-2. SQLite-Backup, Preflight, Migrationsjournal, Verify und Restoretest
-   implementieren;
-3. monotone Ziel-/Empfängerzustände und eindeutige Delivery-/Dedupe-Constraints
-   als Store-Vertrag anlegen;
-4. v1-Bestand ohne neuen externen Dispatch auf eindeutige Legacyzuordnung oder
-   `unknown/legacy_hold` migrieren;
-5. den produktiven Collector weiterhin unverändert lassen, bis die sichere
-   v2-Persistenzschnittstelle gemergt ist.
+1. target-spezifische Claim-/Lease-/Heartbeat-Operationen;
+2. owner- und tokengebundene Completion;
+3. recipient-spezifische, monotone Resultate und Attempts;
+4. Aggregation von pending/partial/delivered/failed/skipped;
+5. Expiry-Recovery und konkurrierende Worker-Tests;
+6. weiterhin ohne produktive Telegram-/Vault-/Router-Aktivierung.
 
-Der Collector-/Cursor-Umbau aus `WP-012` folgt danach auf der gemergten
-DB-v2-Schnittstelle. Dadurch werden klassifizierte Events nicht vorzeitig in ein
-unzureichendes v1-Queue-/Deliverymodell geschrieben.
+Danach folgt `WP-012`: Collector-/Cursor-Adapter mit Byteoffset, Ordinal,
+Partial-Line-, Rotation-, Resume- und verspäteten Sub-Agent-Fällen.
 
 ## Pflegevorgabe
 
