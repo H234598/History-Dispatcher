@@ -6,7 +6,6 @@ import os
 import sqlite3
 import tempfile
 import uuid
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,7 +15,6 @@ from ..crypto import SecretServiceKeyProvider
 from ..schema_v3 import DB_SCHEMA_VERSION, V3_DDL, V3_TABLES
 from .v2 import (
     BackupReport,
-    MigrationV2Error,
     _active_claim_count,
     _assert_no_symlink_chain,
     _assert_regular_owned_database,
@@ -78,6 +76,21 @@ def _binding_for_legacy_target(target_id: str) -> tuple[str, int, str, str]:
     )
 
 
+def _binding_for_legacy_recipient(recipient_key: str) -> tuple[str, str]:
+    normalized = str(recipient_key or "").strip().casefold()
+    if not normalized:
+        normalized = hashlib.sha256(b"legacy-unknown-recipient").hexdigest()[:32]
+    recipient_ref = f"legacy_{normalized}"
+    if len(recipient_ref) > 96:
+        recipient_ref = (
+            "legacy_" + hashlib.sha256(recipient_ref.encode("utf-8")).hexdigest()[:64]
+        )
+    return (
+        recipient_ref,
+        hashlib.sha256(recipient_ref.encode("utf-8")).hexdigest(),
+    )
+
+
 @dataclass(frozen=True)
 class MigrationV3Report:
     ok: bool
@@ -88,6 +101,8 @@ class MigrationV3Report:
     backup: BackupReport | None
     target_deliveries: int
     bindings: int
+    recipient_deliveries: int
+    recipient_bindings: int
     quick_check: str
     foreign_key_violations: tuple[str, ...]
     no_external_dispatch_created: bool
@@ -102,6 +117,8 @@ class MigrationV3Report:
             "backup": self.backup.as_dict() if self.backup else None,
             "target_deliveries": self.target_deliveries,
             "bindings": self.bindings,
+            "recipient_deliveries": self.recipient_deliveries,
+            "recipient_bindings": self.recipient_bindings,
             "quick_check": self.quick_check,
             "foreign_key_violations": list(self.foreign_key_violations),
             "no_external_dispatch_created": self.no_external_dispatch_created,
@@ -140,6 +157,9 @@ class DatabaseV3Migrator:
             targets = int(
                 db.execute("SELECT COUNT(*) FROM target_deliveries").fetchone()[0]
             )
+            recipients = int(
+                db.execute("SELECT COUNT(*) FROM recipient_deliveries").fetchone()[0]
+            )
             bindings = (
                 int(
                     db.execute(
@@ -147,6 +167,15 @@ class DatabaseV3Migrator:
                     ).fetchone()[0]
                 )
                 if _table_exists(db, "target_delivery_bindings")
+                else 0
+            )
+            recipient_bindings = (
+                int(
+                    db.execute(
+                        "SELECT COUNT(*) FROM recipient_delivery_bindings"
+                    ).fetchone()[0]
+                )
+                if _table_exists(db, "recipient_delivery_bindings")
                 else 0
             )
             quick = _quick_check(db)
@@ -162,6 +191,8 @@ class DatabaseV3Migrator:
             "migration_required": DB_SCHEMA_VERSION not in versions,
             "target_deliveries": targets,
             "bindings": bindings,
+            "recipient_deliveries": recipients,
+            "recipient_bindings": recipient_bindings,
             "quick_check": quick,
             "foreign_key_violations": list(foreign_keys),
         }
@@ -180,6 +211,8 @@ class DatabaseV3Migrator:
                 backup=None,
                 target_deliveries=verification["target_deliveries"],
                 bindings=verification["bindings"],
+                recipient_deliveries=verification["recipient_deliveries"],
+                recipient_bindings=verification["recipient_bindings"],
                 quick_check=verification["quick_check"],
                 foreign_key_violations=tuple(
                     verification["foreign_key_violations"]
@@ -196,6 +229,8 @@ class DatabaseV3Migrator:
                 backup=None,
                 target_deliveries=int(preflight["target_deliveries"]),
                 bindings=int(preflight["target_deliveries"]),
+                recipient_deliveries=int(preflight["recipient_deliveries"]),
+                recipient_bindings=int(preflight["recipient_deliveries"]),
                 quick_check=str(preflight["quick_check"]),
                 foreign_key_violations=tuple(
                     str(value) for value in preflight["foreign_key_violations"]
@@ -236,11 +271,31 @@ class DatabaseV3Migrator:
                             str(row["created_at"] or now),
                         ),
                     )
+                recipient_rows = db.execute(
+                    "SELECT id,target_delivery_id,recipient_key,created_at "
+                    "FROM recipient_deliveries ORDER BY created_at,id"
+                ).fetchall()
+                for row in recipient_rows:
+                    recipient_ref, recipient_ref_hash = _binding_for_legacy_recipient(
+                        str(row["recipient_key"])
+                    )
+                    db.execute(
+                        "INSERT INTO recipient_delivery_bindings("
+                        "recipient_delivery_id,target_delivery_id,recipient_ref,"
+                        "recipient_ref_hash,created_at"
+                        ") VALUES (?,?,?,?,?)",
+                        (
+                            str(row["id"]),
+                            str(row["target_delivery_id"]),
+                            recipient_ref,
+                            recipient_ref_hash,
+                            str(row["created_at"] or now),
+                        ),
+                    )
                 counts = self._verify_transaction(db)
                 report_json = _canonical_json(
                     {
-                        "target_deliveries": counts["target_deliveries"],
-                        "bindings": counts["bindings"],
+                        **counts,
                         "no_external_dispatch_created": True,
                     }
                 )
@@ -290,6 +345,8 @@ class DatabaseV3Migrator:
             backup=backup,
             target_deliveries=verification["target_deliveries"],
             bindings=verification["bindings"],
+            recipient_deliveries=verification["recipient_deliveries"],
+            recipient_bindings=verification["recipient_bindings"],
             quick_check=verification["quick_check"],
             foreign_key_violations=tuple(
                 verification["foreign_key_violations"]
@@ -349,8 +406,18 @@ class DatabaseV3Migrator:
         bindings = int(
             db.execute("SELECT COUNT(*) FROM target_delivery_bindings").fetchone()[0]
         )
+        recipients = int(
+            db.execute("SELECT COUNT(*) FROM recipient_deliveries").fetchone()[0]
+        )
+        recipient_bindings = int(
+            db.execute(
+                "SELECT COUNT(*) FROM recipient_delivery_bindings"
+            ).fetchone()[0]
+        )
         if targets != bindings:
             raise MigrationV3Error("every target delivery must have one binding")
+        if recipients != recipient_bindings:
+            raise MigrationV3Error("every recipient delivery must have one binding")
         unsafe = int(
             db.execute(
                 "SELECT COUNT(*) FROM target_deliveries td "
@@ -363,7 +430,12 @@ class DatabaseV3Migrator:
             raise MigrationV3Error("migration made legacy deliveries dispatchable")
         if _quick_check(db) != "ok" or _foreign_key_violations(db):
             raise MigrationV3Error("database integrity checks failed")
-        return {"target_deliveries": targets, "bindings": bindings}
+        return {
+            "target_deliveries": targets,
+            "bindings": bindings,
+            "recipient_deliveries": recipients,
+            "recipient_bindings": recipient_bindings,
+        }
 
 
 def verify_database_v3(database_path: Path) -> dict[str, Any]:
@@ -389,6 +461,20 @@ def verify_database_v3(database_path: Path) -> dict[str, Any]:
             if _table_exists(db, "target_delivery_bindings")
             else 0
         )
+        recipients = (
+            int(db.execute("SELECT COUNT(*) FROM recipient_deliveries").fetchone()[0])
+            if _table_exists(db, "recipient_deliveries")
+            else 0
+        )
+        recipient_bindings = (
+            int(
+                db.execute(
+                    "SELECT COUNT(*) FROM recipient_delivery_bindings"
+                ).fetchone()[0]
+            )
+            if _table_exists(db, "recipient_delivery_bindings")
+            else 0
+        )
     return {
         "ok": (
             v2["ok"]
@@ -397,6 +483,7 @@ def verify_database_v3(database_path: Path) -> dict[str, Any]:
             and quick == "ok"
             and not foreign_keys
             and targets == bindings
+            and recipients == recipient_bindings
         ),
         "schema_versions": list(versions),
         "missing_tables": list(missing),
@@ -404,5 +491,7 @@ def verify_database_v3(database_path: Path) -> dict[str, Any]:
         "foreign_key_violations": list(foreign_keys),
         "target_deliveries": targets,
         "bindings": bindings,
+        "recipient_deliveries": recipients,
+        "recipient_bindings": recipient_bindings,
         "no_external_dispatch_created": True,
     }
