@@ -14,9 +14,12 @@
 - [x] Sicherheitsinvarianten dokumentiert und mit Tests verknüpft (`A-012`).
 - [x] Reuse Ledger initialisiert; in diesem Schnitt wurde kein externer Code übernommen (`A-014`).
 - [x] Architektur-, Applet- und v1-Vertragsdokumentation erstellt (`WP-001`).
-- [x] Negativtests für Socket-, Crypto-, Snapshot-, Applet- und systemd-Grenzen erstellt (`WP-001`).
-- [x] GitHub-Actions-Run `30340908142` auf Commit `a7b883b11b57d84c899bc7a94b6b3e1eb2d17f02` vollständig grün: Installation, Syntax/tests und Build.
-- [ ] Reviewbefunde abgearbeitet; vor Merge werden Threads und Reviews erneut geprüft.
+- [x] Verhaltensbasierte Negativtests für Socket, Peer-Credentials, Crypto, Snapshot, Appletaktionen, Removal und systemd-Härtung erstellt (`WP-001`).
+- [x] GitHub-Actions-Run `30340982857` auf Commit `8606a765730b8bd244ec1971284036e7a903372c` vollständig grün; qlty ebenfalls grün.
+- [x] Sieben CodeRabbit-Befunde fachlich umgesetzt: deterministischer Telegramfilter, messbare v1/v2-Grenze, strikte Request-Bodies, requestgebundene Idempotenz, breitere Security-Change-Control-Regel, Verhaltensnachweise und robuste ADR-ID-Prüfung.
+- [x] Reviewbedingte v1-Härtung reserviert Request-IDs vor Mutationen und bindet sie an Same-User-Scope, Operation und kanonischen Body-Fingerprint; Queue-/Deliveryschema bleibt unverändert.
+- [ ] GitHub-Actions-, qlty- und CodeRabbit-Gates auf dem Review-Fix-Commit vollständig grün.
+- [ ] Alle sieben Reviewthreads nach erfolgreicher Revalidierung aufgelöst.
 - [ ] Baseline-PR gemergt (`A-015`).
 
 ## Nächster Schnitt nach grünem Merge
@@ -27,6 +30,8 @@
 2. aktuelle, Legacy-, Sub-Agent- und Malformed-Fixtures aufnehmen;
 3. `HistoryKind`, Confidence, Parser, Redaction und Dedupe implementieren;
 4. `T-CLS-*` und Leakgate aktivieren.
+
+Vorbereitend wurde der aktuelle OpenAI-Codex-Protokollstand erneut gegen Commit `8e271dc02b23d42827875019924be0f5005642b0` geprüft. Dieser Upstreamstand wird im nächsten PR als Fixture-/Protokollreferenz dokumentiert; er ist kein Runtime-Dependency.
 
 ## Pflegevorgabe
 
