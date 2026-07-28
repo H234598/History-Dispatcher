@@ -29,10 +29,8 @@ jobs:
           git clone --quiet --depth 1 --branch "$HEAD_BRANCH" \
             "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY}.git" source
           cd source
-          PYTHON="$(find /opt/hostedtoolcache/Python/3.13* -path '*/bin/python' -type f | head -n 1)"
-          test -n "$PYTHON"
-          "$PYTHON" -m pip install -q -e ".[dev]"
-          "$PYTHON" -m pytest \
+          python3 -m pip install -q --ignore-requires-python -e ".[dev]"
+          python3 -m pytest \
             tests/test_identifiers.py \
             tests/test_delivery_state.py \
             tests/test_migration_v2.py \
