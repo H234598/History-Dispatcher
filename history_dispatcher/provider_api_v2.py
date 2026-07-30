@@ -19,6 +19,7 @@ from .telegram_provider import MAX_NATIVE_RECIPIENT_REFS, TelegramRecipientOutco
 PROVIDER_API_SCHEMA_VERSION = 2
 PROVIDER_API_OPERATIONS = (
     "provider.v2.claim",
+    "provider.v2.reclaim",
     "provider.v2.renew",
     "provider.v2.register_recipients",
     "provider.v2.record_recipients",
@@ -223,6 +224,8 @@ class ProviderApiV2:
         body = _body(raw_body)
         if operation == "provider.v2.claim":
             return self._claim(body)
+        if operation == "provider.v2.reclaim":
+            return self._reclaim(body)
         if operation == "provider.v2.renew":
             return self._renew(body)
         if operation == "provider.v2.register_recipients":
@@ -293,6 +296,51 @@ class ProviderApiV2:
             "ok": True,
             "schema_version": PROVIDER_API_SCHEMA_VERSION,
             "claims": [_claim_dict(claim) for claim in claims],
+        }
+
+    def _reclaim(self, body: Mapping[str, Any]) -> dict[str, Any]:
+        _only(
+            body,
+            frozenset(
+                {
+                    "target_delivery_id",
+                    "provider_id",
+                    "worker_id",
+                    "capability_version",
+                    "previous_attempt_no",
+                    "lease_seconds",
+                }
+            ),
+        )
+        claim = self.store.reclaim_target_delivery(
+            target_delivery_id=_identifier(body, "target_delivery_id"),
+            provider_id=_identifier(body, "provider_id"),
+            worker_id=_identifier(body, "worker_id"),
+            capability_version=_identifier(body, "capability_version"),
+            previous_attempt_no=_integer(
+                body,
+                "previous_attempt_no",
+                default=0,
+                minimum=1,
+                maximum=2**31 - 1,
+            ),
+            lease_seconds=_integer(
+                body,
+                "lease_seconds",
+                default=120,
+                minimum=10,
+                maximum=1800,
+            ),
+        )
+        claims: list[dict[str, Any]] = []
+        if claim is not None:
+            rendered = _claim_dict(claim)
+            rendered["reconciliation_only"] = True
+            claims.append(rendered)
+        return {
+            "ok": True,
+            "schema_version": PROVIDER_API_SCHEMA_VERSION,
+            "claims": claims,
         }
 
     def _renew(self, body: Mapping[str, Any]) -> dict[str, Any]:

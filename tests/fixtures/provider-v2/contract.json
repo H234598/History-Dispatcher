@@ -5,6 +5,7 @@
   "target": "telegram",
   "operations": [
     "provider.v2.claim",
+    "provider.v2.reclaim",
     "provider.v2.renew",
     "provider.v2.register_recipients",
     "provider.v2.record_recipients",

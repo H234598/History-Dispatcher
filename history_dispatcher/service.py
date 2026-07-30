@@ -48,7 +48,7 @@ IDEMPOTENT_OPERATIONS = frozenset({
     "maintenance.prune", "provider.v2.renew", "provider.v2.register_recipients",
     "provider.v2.record_recipients", "provider.v2.complete", "provider.v2.heartbeat",
 })
-ONE_SHOT_SENSITIVE_OPERATIONS = frozenset({"provider.v2.claim"})
+ONE_SHOT_SENSITIVE_OPERATIONS = frozenset({"provider.v2.claim", "provider.v2.reclaim"})
 PROVIDER_REQUEST_ID_REQUIRED = frozenset(PROVIDER_API_OPERATIONS)
 
 
