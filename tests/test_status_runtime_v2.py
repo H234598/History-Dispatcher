@@ -143,3 +143,59 @@ def test_runtime_status_caps_worker_rows_and_fails_closed_on_bad_details(
         worker for worker in status["workers"] if worker["worker_id"] == "worker-000"
     )
     assert malformed["provider"] == "unknown"
+
+
+def test_runtime_status_neutralizes_untrusted_provider_and_skips_invalid_worker(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "history.sqlite3"
+    _runtime_tables(database)
+    with sqlite3.connect(database) as db:
+        db.executemany(
+            "INSERT INTO worker_heartbeats("
+            "worker_id,target_id,capability_version,state,last_heartbeat_at,details_json"
+            ") VALUES (?,?,?,?,?,?)",
+            (
+                (
+                    "safe-worker",
+                    "telegram",
+                    "history-dispatcher-telegram-native-v1",
+                    "idle",
+                    "2026-07-30T20:00:00Z",
+                    json.dumps(
+                        {
+                            "provider_id": (
+                                "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef"
+                            )
+                        }
+                    ),
+                ),
+                (
+                    "../invalid-worker",
+                    "telegram",
+                    "history-dispatcher-telegram-native-v1",
+                    "idle",
+                    "2026-07-30T19:00:00Z",
+                    '{"provider_id":"history_dispatcher"}',
+                ),
+            ),
+        )
+
+    status = build_runtime_health_status(
+        database_path=database,
+        telegram_provider="history_dispatcher",
+        credential=CredentialStatus(configured=False),
+        queue_counts={},
+        generated_at="2026-07-30T20:00:01Z",
+    ).as_dict()
+
+    assert status["workers"] == [
+        {
+            "worker_id": "safe-worker",
+            "target": "telegram",
+            "provider": "unknown",
+            "capability": "history-dispatcher-telegram-native-v1",
+            "state": "idle",
+            "heartbeat": "2026-07-30T20:00:00Z",
+        }
+    ]
