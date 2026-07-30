@@ -218,6 +218,56 @@ class IdempotencyStore:
             db.commit()
         return dict(response)
 
+    def release(
+        self,
+        request_id: str,
+        operation: str,
+        fingerprint: str,
+    ) -> bool:
+        """Release only an exact pending reservation.
+
+        Completed responses are durable and can never be removed through this
+        path. This is used only when validation proves that a one-shot mutation
+        did not start.
+        """
+
+        normalized_id, normalized_operation, normalized_fingerprint = (
+            self._validate_identity(request_id, operation, fingerprint)
+        )
+        with self._lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT operation, request_fingerprint, client_scope, response_json "
+                "FROM idempotency_results WHERE request_id=?",
+                (normalized_id,),
+            ).fetchone()
+            if row is None:
+                db.commit()
+                return False
+            if (
+                str(row["operation"]) != normalized_operation
+                or str(row["request_fingerprint"]) != normalized_fingerprint
+                or str(row["client_scope"]) != self.client_scope
+            ):
+                db.rollback()
+                raise IdempotencyConflict(normalized_id)
+            if str(row["response_json"] or ""):
+                db.commit()
+                return False
+            deleted = db.execute(
+                "DELETE FROM idempotency_results WHERE request_id=? "
+                "AND operation=? AND request_fingerprint=? AND client_scope=? "
+                "AND response_json=''",
+                (
+                    normalized_id,
+                    normalized_operation,
+                    normalized_fingerprint,
+                    self.client_scope,
+                ),
+            ).rowcount
+            db.commit()
+            return bool(deleted)
+
     def prune(self, *, retention_days: int) -> int:
         cutoff = (
             datetime.now(timezone.utc) - timedelta(days=max(1, int(retention_days)))
