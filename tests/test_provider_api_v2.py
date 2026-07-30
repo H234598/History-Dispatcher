@@ -111,6 +111,7 @@ def test_teebotus_provider_v2_claim_register_record_complete_and_heartbeat(
 
     claimed = api.dispatch("provider.v2.claim", fixture["claim_request"])
     assert claimed["ok"] is True
+    assert claimed["schema_version"] == 2
     assert len(claimed["claims"]) == 1
     claim = claimed["claims"][0]
     assert claim["provider_id"] == "teebotus"
@@ -218,7 +219,7 @@ def test_provider_v2_validation_rejects_unknown_fields_and_provider_mismatch(
             "capability_version": "history-dispatcher-telegram-native-v1",
         },
     )
-    assert native == {"ok": True, "claims": []}
+    assert native == {"ok": True, "schema_version": 2, "claims": []}
 
 
 def test_provider_v2_socket_claim_is_one_shot_and_never_cached_with_token(
