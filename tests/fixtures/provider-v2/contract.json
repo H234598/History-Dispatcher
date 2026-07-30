@@ -1,0 +1,38 @@
+{
+  "schema_version": 2,
+  "capability": "history-dispatcher-telegram-v2",
+  "provider": "teebotus",
+  "target": "telegram",
+  "operations": [
+    "provider.v2.claim",
+    "provider.v2.renew",
+    "provider.v2.register_recipients",
+    "provider.v2.record_recipients",
+    "provider.v2.complete",
+    "provider.v2.heartbeat"
+  ],
+  "claim_request": {
+    "target_id": "telegram",
+    "provider_id": "teebotus",
+    "worker_id": "teebotus-worker",
+    "capability_version": "history-dispatcher-telegram-v2",
+    "limit": 20,
+    "lease_seconds": 120
+  },
+  "recipient_refs": [
+    "status_admin_primary",
+    "status_admin_secondary"
+  ],
+  "recipient_outcomes": [
+    {
+      "recipient_ref": "status_admin_primary",
+      "status": "accepted",
+      "message_ref_key": "message_primary"
+    },
+    {
+      "recipient_ref": "status_admin_secondary",
+      "status": "skipped",
+      "reason_code": "route_inactive"
+    }
+  ]
+}
