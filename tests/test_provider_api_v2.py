@@ -221,7 +221,9 @@ def test_provider_v2_validation_rejects_unknown_fields_and_provider_mismatch(
     assert native == {"ok": True, "claims": []}
 
 
-def test_provider_v2_socket_claim_is_request_idempotent(tmp_path: Path) -> None:
+def test_provider_v2_socket_claim_is_one_shot_and_never_cached_with_token(
+    tmp_path: Path,
+) -> None:
     database, provider = _prepared_database(tmp_path)
     config_file = tmp_path / "config.toml"
     config_file.write_text("", encoding="utf-8")
@@ -239,7 +241,7 @@ def test_provider_v2_socket_claim_is_request_idempotent(tmp_path: Path) -> None:
     body = json.loads(FIXTURE.read_text(encoding="utf-8"))["claim_request"]
     request = {
         "protocol_version": 1,
-        "request_id": "provider-v2-idempotent-claim",
+        "request_id": "provider-v2-one-shot-claim",
         "operation": "provider.v2.claim",
         "body": body,
     }
@@ -255,7 +257,26 @@ def test_provider_v2_socket_claim_is_request_idempotent(tmp_path: Path) -> None:
 
     assert all(operation in OPERATIONS for operation in PROVIDER_API_OPERATIONS)
     assert first["ok"] is True
-    assert first == second
     assert len(first["data"]["claims"]) == 1
+    claim_token = first["data"]["claims"][0]["claim_token"]
+    assert second["ok"] is False
+    assert second["error"]["code"] == "idempotency_in_progress"
     assert conflict["ok"] is False
     assert conflict["error"]["code"] == "idempotency_conflict"
+
+    with sqlite3.connect(database) as db:
+        row = db.execute(
+            "SELECT response_json FROM idempotency_results WHERE request_id=?",
+            ("provider-v2-one-shot-claim",),
+        ).fetchone()
+        attempt_count = db.execute(
+            "SELECT attempt_count FROM target_deliveries "
+            "WHERE target_id='telegram'"
+        ).fetchone()[0]
+        attempts = db.execute(
+            "SELECT COUNT(*) FROM delivery_attempts "
+            "WHERE recipient_delivery_id IS NULL"
+        ).fetchone()[0]
+    assert row == ("",)
+    assert attempt_count == attempts == 1
+    assert claim_token.encode("utf-8") not in database.read_bytes()
