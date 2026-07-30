@@ -1,7 +1,7 @@
 # Provider-v2-Worker-API
 
 **Stand:** 30. Juli 2026  
-**Implementierungsschnitt:** `PR-HD-08-teebotus-provider-v2`  
+**Implementierungsschnitte:** `PR-HD-08a-provider-v2-api`, `PR-HD-08c-provider-v2-target-reclaim`  
 **Schema:** `2`  
 **Transport:** owner-only Same-User-Unix-Socket, `protocol_version = 1`
 
@@ -10,24 +10,18 @@
 Die Provider-v2-API verbindet externe Transportworker mit dem zentralen,
 providergebundenen Delivery-Store des History-Dispatchers. Der erste echte
 Client ist TeeBotus; der spätere native Telegramworker verwendet denselben
-Storevertrag, aber eine andere Provider-ID und Capability.
+Storevertrag mit eigener Provider-ID und Capability.
 
-Der History-Dispatcher bleibt Eigentümer von:
-
-- Event und verschlüsselter Payload;
-- Route-Plan und unveränderlicher Providerbindung;
-- Target- und Recipient-Delivery;
-- Claim, Lease und Attempt;
-- Idempotenz, Retry, Backoff und Aggregation;
-- Reconciliation- und `possible_duplicate`-Zuständen.
-
-Der Worker besitzt nur den konkreten Transport und meldet Ergebnisse zurück.
-Es gibt keinen automatischen Cross-Provider-Fallback.
+Der History-Dispatcher bleibt Eigentümer von Event, verschlüsselter Payload,
+Route-Plan, Providerbindung, Target-/Recipient-Delivery, Claim, Lease, Attempt,
+Idempotenz, Retry, Aggregation und Reconciliation. Der Worker besitzt nur den
+konkreten Transport. Es gibt keinen automatischen Cross-Provider-Fallback.
 
 ## 2. Operationen
 
 ```text
 provider.v2.claim
+provider.v2.reclaim
 provider.v2.renew
 provider.v2.register_recipients
 provider.v2.record_recipients
@@ -35,13 +29,12 @@ provider.v2.complete
 provider.v2.heartbeat
 ```
 
-Alle Operationen sind mutierend und verlangen eine nicht leere `request_id`.
-Der Body wird gegen eine feste Feldallowlist, endliches JSON und maximal 256 KiB
-geprüft.
+Alle Operationen sind mutierend, verlangen eine nicht leere `request_id` und
+werden gegen feste Feldallowlists, endliches JSON und maximal 256 KiB geprüft.
 
-## 3. Claim
+## 3. Normaler Claim
 
-### 3.1 Request
+### Request
 
 ```json
 {
@@ -59,7 +52,7 @@ geprüft.
 }
 ```
 
-Optionale, begrenzte Felder:
+Optionale begrenzte Felder:
 
 ```text
 max_attempts
@@ -71,7 +64,7 @@ jitter_ratio
 Provider- und Capability-Missmatches liefern keine fremde Delivery und lösen
 keinen Fallback aus.
 
-### 3.2 Antwort mit Claim
+### Antwort mit Claim
 
 ```json
 {
@@ -106,21 +99,91 @@ keinen Fallback aus.
 }
 ```
 
-`claim_token` wird genau einmal an den erfolgreichen Claimer zurückgegeben. In
-der Datenbank wird nur SHA-256 des Tokens gespeichert.
+Der Token wird genau einmal zurückgegeben; in der Datenbank wird nur sein
+SHA-256 gespeichert.
 
-### 3.3 One-shot-Idempotenz
+## 4. Gezielter Reclaim für Reconciliation
 
-Eine Claimantwort mit mindestens einem Claim enthält einen geheimen Token und
-wird deshalb **nicht** in `idempotency_results.response_json` gespeichert.
+`provider.v2.reclaim` bindet nach Ablauf einer alten Claim-Lease exakt dieselbe
+Target-Delivery erneut. Der Pfad dient ausschließlich dazu, bereits entstandene
+Recipient- oder Completioncallbacks aus einem verschlüsselten Spool mit einem
+neuen Token zu replayen.
 
-Für dieselbe Request-ID gilt danach:
+### Request
+
+```json
+{
+  "protocol_version": 1,
+  "request_id": "reclaim-target-attempt-1",
+  "operation": "provider.v2.reclaim",
+  "body": {
+    "target_delivery_id": "target_opaque",
+    "provider_id": "teebotus",
+    "worker_id": "teebotus-worker",
+    "capability_version": "history-dispatcher-telegram-v2",
+    "previous_attempt_no": 1,
+    "lease_seconds": 120
+  }
+}
+```
+
+### Bedingungen
+
+- Target, Route-Plan und Providerbinding müssen existieren und aktiv sein;
+- Event darf nicht auf `legacy_hold` stehen;
+- Provider und Capability müssen exakt zur unveränderlichen Binding passen;
+- `previous_attempt_no` muss dem aktuellen Attempt entsprechen;
+- ein noch aktiver Claim wird nicht gestohlen;
+- terminale Zustände werden nicht geöffnet;
+- stale Reclaims nach einem bereits erfolgten Rebind liefern `claims: []`;
+- Cross-Provider-Reclaim liefert `claims: []`.
+
+### Erfolgreiche Antwort
+
+Der neue Claim besitzt einen neuen Attempt und einen neuen One-shot-Token:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "ok": true,
+    "schema_version": 2,
+    "claims": [
+      {
+        "target_delivery_id": "target_opaque",
+        "attempt_no": 2,
+        "claim_token": "new-one-shot-secret",
+        "reconciliation_only": true,
+        "payload": {},
+        "successful_recipient_refs": [],
+        "open_recipient_refs": []
+      }
+    ]
+  }
+}
+```
+
+Der vorherige offene Target-Attempt wird als `reclaimed_expired` mit
+`claim_expired_reconciliation` abgeschlossen. Payload, Binding und
+Recipientzustände werden nicht verändert.
+
+`reconciliation_only=true` ist eine harte Workergrenze: Der Token darf für
+`record_recipients`, `complete` und nötige Leaseverlängerung verwendet werden,
+aber niemals einen neuen Telegram-Send autorisieren.
+
+## 5. One-shot-Idempotenz
+
+`provider.v2.claim` und `provider.v2.reclaim` sind sensible One-shot-
+Operationen.
+
+Eine Antwort mit mindestens einem Claim enthält einen geheimen Token und wird
+nicht in `idempotency_results.response_json` gespeichert:
 
 - identischer Body → `idempotency_in_progress`;
 - anderer Body oder andere Operation → `idempotency_conflict`;
-- kein zweiter Attempt und kein zweiter Claimtoken.
+- kein zweiter Attempt und kein zweiter Token.
 
-Eine erfolgreiche leere Pollantwort ist tokenfrei:
+Eine erfolgreiche leere Antwort ist tokenfrei:
 
 ```json
 {
@@ -133,15 +196,11 @@ Eine erfolgreiche leere Pollantwort ist tokenfrei:
 }
 ```
 
-Sie wird normal im Idempotenzcache gespeichert und kann sicher identisch
-wiederholt werden.
+Sie wird dauerhaft gecached und sicher identisch replayt. Reine
+Validierungsfehler geben die exakte noch leere Reservierung frei. Abgeschlossene
+Antworten können über diesen Pfad niemals gelöscht werden.
 
-Reine Validierungsfehler finden vor einer Deliverymutation statt. Ihre noch
-leere Reservierung wird exakt freigegeben, sodass ein korrigierter Request mit
-derselben Request-ID erneut versucht werden kann. Eine abgeschlossene Antwort
-kann über diesen Pfad niemals gelöscht werden.
-
-## 4. Leaseverlängerung
+## 6. Leaseverlängerung
 
 `provider.v2.renew` verlangt:
 
@@ -159,31 +218,24 @@ max_claim_lifetime_seconds
 ```
 
 Worker, Token, Target und Ablaufzeit müssen zum aktiven Claim passen. Die harte
-maximale Lebensdauer des Attempts kann nicht durch wiederholte Renew-Aufrufe
+maximale Lebensdauer eines Attempts kann nicht durch wiederholte Renew-Aufrufe
 überschritten werden.
 
-## 5. Recipientregistrierung
+## 7. Recipientregistrierung
 
-### TeeBotus
-
-TeeBotus löst seine privaten Admin-/Accountrouten selbst auf und registriert
-unter dem aktiven Claim ausschließlich opaque Referenzen, beispielsweise:
+TeeBotus löst private Admin-/Accountrouten selbst auf und registriert unter dem
+aktiven Claim ausschließlich opaque Referenzen, beispielsweise:
 
 ```text
 status_admin_primary
 status_admin_secondary
 ```
 
-Bot-Token, Chat-ID, private Accountobjekte oder Message-IDs werden nicht an den
-History-Dispatcher übertragen.
+Bot-Token, Chat-ID, private Accountobjekte oder rohe Message-IDs werden nicht an
+den History-Dispatcher übertragen. Der native Worker darf nur bereits im
+Route-Plan gebundene Recipientprofile verwenden.
 
-### Nativer Worker
-
-Der native Worker darf nur Recipientprofile verwenden, die bereits im
-unveränderlichen Route-Plan gebunden wurden. Ungeplante Recipientrefs werden
-abgewiesen.
-
-## 6. Recipientresultate
+## 8. Recipientresultate
 
 `provider.v2.record_recipients` meldet pro Empfänger:
 
@@ -204,20 +256,16 @@ reason_code
 possible_duplicate
 ```
 
-Die zentrale Merge-Semantik verhindert Downgrades von `accepted`, `delivered`
-und `acknowledged`. Bereits erfolgreiche Empfänger werden in späteren Claims
-unter `successful_recipient_refs` ausgewiesen und nicht erneut angeboten.
-
-Ein unklarer Absturz nach externem Accept wird `possible_duplicate`. Dieser
-Empfänger ist kein normal retrybarer Recipient und bleibt bis zur
+Die zentrale Merge-Semantik verhindert Downgrades erfolgreicher Zustände.
+Erfolgreiche Empfänger werden in späteren Claims unter
+`successful_recipient_refs` ausgewiesen und nicht erneut angeboten.
+`possible_duplicate` ist nicht normal retrybar und bleibt bis zur
 Reconciliation blockiert.
 
-## 7. Targetcompletion
+## 9. Targetcompletion
 
 `provider.v2.complete` kann den Zielzustand aus Recipientresultaten ableiten oder
-explizit einen erlaubten terminalen/retrybaren Zustand melden.
-
-Unterstützte Retryparameter:
+einen erlaubten Zustand explizit melden. Unterstützte Retryparameter:
 
 ```text
 retry_after_seconds
@@ -227,11 +275,11 @@ max_backoff_seconds
 jitter_ratio
 ```
 
-Ein explizites `retry_after_seconds` hat Vorrang vor dem deterministischen
-exponentiellen Backoff, wenn es länger ist. Nach `max_attempts` folgt
-Quarantäne; bereits erfolgreiche Recipientzustände bleiben erhalten.
+Ein längeres `retry_after_seconds` hat Vorrang vor dem deterministischen
+Backoff. Nach `max_attempts` folgt Quarantäne; erfolgreiche Recipientzustände
+bleiben erhalten.
 
-## 8. Heartbeat
+## 10. Heartbeat
 
 `provider.v2.heartbeat` speichert nur begrenzte Betriebsmetadaten:
 
@@ -244,33 +292,34 @@ state
 details
 ```
 
-`details` besitzt höchstens 16 formatgeprüfte Felder. Strings werden vor der
-Persistenz redigiert. Tokens, Chat-IDs, Payloads und private Pfade sind kein
-zulässiger Heartbeatinhalt.
+`details` besitzt höchstens 16 formatgeprüfte Felder. Strings werden redigiert.
+Tokens, Chat-IDs, Payloads und private Pfade sind unzulässig.
 
-## 9. Sicherheitsgarantien
+## 11. Sicherheitsgarantien
 
 - Same-User-`SO_PEERCRED` bleibt Transportgrenze;
 - jede Provideroperation verlangt eine Request-ID;
-- Claimtokens werden nie im Status, Snapshot oder Idempotenz-Responsecache
-  gespeichert;
+- Claimtokens stehen nie in Status, Snapshot oder Idempotenz-Responsecache;
 - rohe Telegramtokens und Chat-IDs sind keine Contractfelder;
 - unbekannte Felder werden fail-closed abgewiesen;
 - Provider und Capability werden exakt geprüft;
 - `legacy_unknown` bleibt unclaimbar;
 - keine automatische Providerumschaltung;
-- keine erneute Zustellung bereits erfolgreicher Empfänger;
+- keine erneute Zustellung erfolgreicher oder `possible_duplicate`-Empfänger;
+- aktive Claims werden durch Reclaim nicht gestohlen;
+- terminale Targets werden nicht wieder geöffnet;
 - keine zweite Mutation bei Request-Replay.
 
-## 10. Gemeinsamer Fixture-Korpus
+## 12. Gemeinsamer Fixture-Korpus
 
-Der erste versionierte Contract-Fixture liegt unter:
+Der versionierte Fixture liegt unter:
 
 ```text
 tests/fixtures/provider-v2/contract.json
 ```
 
-Er enthält ausschließlich künstliche opaque Referenzen. Der gepaarte
-TeeBotus-Adapter muss denselben Operationssatz, dieselbe Capability und dieselben
-Recipient-/Outcome-Beispiele konsumieren. Erst wenn beide Repositorys denselben
-Korpus bestehen, gilt `TG-F-001` vollständig als erledigt.
+Er enthält ausschließlich künstliche opaque Referenzen. Der TeeBotus-Adapter
+konsumiert denselben Operationssatz, dieselbe Capability und dieselben
+Recipient-/Outcome-Beispiele. Mit `provider.v2.reclaim` wird der Fixture-Korpus
+im TeeBotus-Cutover erweitert, bevor der lange Claimablauf-/Callback-Rebind-Test
+als abgeschlossen gilt.
