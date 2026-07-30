@@ -140,6 +140,7 @@ def test_control_protocol_is_versioned_bounded_and_allowlisted() -> None:
         "protocol.describe",
         "health.get",
         "status.get",
+        "status.get_redacted",
         "report.get",
         "history.append",
         "history.query",

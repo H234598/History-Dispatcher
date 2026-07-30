@@ -19,10 +19,14 @@ from .crypto import SecretServiceKeyProvider
 from .protocol import ProtocolError, encode_message, read_message
 from .idempotency import IdempotencyConflict, IdempotencyInProgress, IdempotencyStore
 from .store import DispatcherStore
+from .status_api_v2 import build_redacted_status_response
+from .status_runtime_v2 import build_runtime_health_status
+from .status_snapshot_v2 import write_status_v2_snapshot
+from .status_v2 import CredentialStatus
 
 
 OPERATIONS = (
-    "protocol.describe", "health.get", "status.get", "report.get",
+    "protocol.describe", "health.get", "status.get", "status.get_redacted", "report.get",
     "history.append", "history.query",
     "dispatch.claim", "dispatch.complete", "dispatch.retry",
     "delivery.record", "config.get", "config.validate", "config.apply",
@@ -109,7 +113,22 @@ class DispatcherService:
         })
         return status
 
+    def _status_v2(self) -> dict[str, Any]:
+        queue = self.store.status()
+        status = build_runtime_health_status(
+            database_path=self.config.database_path,
+            telegram_provider="teebotus",
+            credential=CredentialStatus(configured=False),
+            queue_counts=dict(queue.get("status_counts", {})),
+            generated_at=_timestamp(),
+        )
+        return build_redacted_status_response(status).as_dict()
+
     def _write_snapshot(self) -> None:
+        write_status_v2_snapshot(
+            self.config.runtime_dir / "status-v2.json",
+            self._status_v2(),
+        )
         path = self.config.snapshot_path
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -211,6 +230,8 @@ class DispatcherService:
     def _dispatch(self, operation: str, body: dict[str, Any]) -> dict[str, Any]:
         if operation == "protocol.describe":
             return {"protocol_version": 1, "operations": list(OPERATIONS), "max_frame_bytes": self.config.frame_limit_bytes}
+        if operation == "status.get_redacted":
+            return self._status_v2()
         if operation in {"health.get", "status.get", "report.get"}:
             return self._status()
         if operation == "config.get":
