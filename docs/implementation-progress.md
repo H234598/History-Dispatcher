@@ -3,162 +3,133 @@
 **Planquelle:** `HISTORY_DISPATCHER_CINNAMON_APPLET_IMPLEMENTIERUNGSPLAN`, SHA-256 `a1f52c11117a063702f4cff008c9d24646f8f33a7540cdd1bf48ab220053ba0c`  
 **Telegram-Addendum:** `docs/implementation-plan-addendum-telegram.md`  
 **Ausgangsbasis:** `main@8f0bb05a540942e61c979a51bbaeca32d4308eb1`  
-**Aktueller Main-Stand:** `01c791c252547c3766edfae97f2628a5c3cf6183`  
-**Aktiver Cross-Repository-Schnitt:** `PR-HD-08b / TB-HD-01-provider-v2-adapter-foundation`  
-**Folgeschnitt:** `TB-HD-02-provider-v2-cutover`
+**Aktueller Main-Stand:** `c10623c24885618fbacdb4c84e6430359914a185`  
+**Aktiver History-Dispatcher-Schnitt:** `PR-HD-08c-provider-v2-target-reclaim` / PR #10  
+**Aktiver TeeBotus-Schnitt:** `TB-HD-02-provider-v2-cutover` / PR #3
 
 ## Gemergte History-Dispatcher-Schnitte
 
 | Schnitt | Inhalt | Main-Commit |
 |---|---|---|
-| PR-HD-01 | Baseline, ADRs, Sicherheitsverträge | `4ff947aba6da390dcff7adaea41e9e4871132eef` |
-| PR-HD-02 | Codex-Fixtures, Sanitizer, Classifier | `d6b9fccdce5d429d07e182b1fff985c0fd1c8c40` |
+| PR-HD-01 | Baseline, ADRs und Sicherheitsverträge | `4ff947aba6da390dcff7adaea41e9e4871132eef` |
+| PR-HD-02 | Codex-Fixtures, Sanitizer und Classifier | `d6b9fccdce5d429d07e182b1fff985c0fd1c8c40` |
 | PR-HD-03 | transaktionale DB-v2-Migration | `ec3acf360cabc793835ecf3a8106fd1501897ba4` |
 | PR-HD-04 | dualer Telegram-Providervertrag | `9d3f9420805986720e458d18876539962eab893f` |
-| PR-HD-06 | Config-v2-Vertrags- und Previewgrenze | `278f9a3198a54cde7495b1a3ce4fb0c85dabc246` |
 | PR-HD-05 | providergebundener Route-/Delivery-Store | `74cec04ef6f06edf3ea3e5826f9fd4f3e5a1afc3` |
+| PR-HD-06 | Config-v2-Vertrags- und Previewgrenze | `278f9a3198a54cde7495b1a3ce4fb0c85dabc246` |
 | PR-HD-07 | redigierte Status-v2-API und Snapshot | `2efc7c7f68225936c79d06745ef0645cb3ec5999` |
 | PR-HD-08a | versionierte Provider-v2-Worker-API | `01c791c252547c3766edfae97f2628a5c3cf6183` |
+| PR-HD-09-plan | Cross-Repository-Rollout und Reihenfolge gepflegt | `c10623c24885618fbacdb4c84e6430359914a185` |
 
-## Abgeschlossener Schnitt PR-HD-08a
+## Gemergte TeeBotus-Grundlage
 
-### Gemeinsamer Contract-Fixture-Korpus
+| Schnitt | Inhalt | Main-Commit |
+|---|---|---|
+| TB-HD-01 / PR-HD-08b | Provider-v2-Client, Claim-/Lease-/Recipient-API und verschlüsselter Callback-Spool | `5989b5129808486a9be272324285e6b5a02e76ab` |
 
-- [x] `tests/fixtures/provider-v2/contract.json` angelegt;
-- [x] Schema-Version `2`, Provider `teebotus`, Target `telegram` und Capability
-  `history-dispatcher-telegram-v2` eingefroren;
-- [x] künstliche opaque Recipient-/Message-Referenzen verwendet;
-- [x] Token- und Chat-ID-Leaknegative Tests ergänzt;
-- [x] Operationsreihenfolge für beide Repositoryadapter festgelegt.
+Die Adaptergrundlage verwendet semantisch denselben secretfreien Fixture-Korpus
+wie der History-Dispatcher. Claimtokens werden im separaten
+`ProviderCallbackSpool` ausschließlich AES-256-GCM-verschlüsselt mit einem
+per-instance Secret-Purpose und Instanzbindung als AAD gespeichert. Legacy-
+Client, Legacy-Spool und die alten Bridgeoperationen bleiben kompatibel.
 
-### ProviderApiV2
-
-- [x] `provider.v2.claim` implementiert;
-- [x] `provider.v2.renew` implementiert;
-- [x] `provider.v2.register_recipients` implementiert;
-- [x] `provider.v2.record_recipients` implementiert;
-- [x] `provider.v2.complete` implementiert;
-- [x] `provider.v2.heartbeat` implementiert;
-- [x] strikte Feldallowlists, Body-/Array-/Zahlen-/Jittergrenzen und endliches
-  JSON implementiert;
-- [x] Provider-/Capability-Mismatch ohne Fallback getestet;
-- [x] alle Provideroperationen in die feste Same-User-Socket-Allowlist
-  aufgenommen und Request-ID-pflichtig gemacht.
-
-### Idempotenz- und Tokengrenze
-
-- [x] normale Provider-Mutationen dauerhaft idempotent gecacht;
-- [x] `IdempotencyStore.release()` für exakt passende, noch leere
-  Reservierungen implementiert;
-- [x] abgeschlossene Antworten gegen Release geschützt;
-- [x] Claimantworten mit Token niemals in `response_json` persistiert;
-- [x] identischer tokenhaltiger Claim-Replay ergibt `idempotency_in_progress`;
-- [x] abweichender Replay ergibt `idempotency_conflict`;
-- [x] kein zweiter Attempt bei Replay;
-- [x] Claimtoken nicht in den SQLite-Dateibytes vorhanden;
-- [x] reine Validierungsfehler geben die Reservierung für korrigierten Request
-  frei;
-- [x] erfolgreiche leere Claimantworten tokenfrei gecacht und sicher replaybar.
-
-### Gate- und Mergeevidenz
-
-- [x] Test-only-Head `0458352b26fa1a2b9820c6a3732c0597226d5e4c`
-  erwartungsgemäß rot wegen fehlendem `provider_api_v2`;
-- [x] one-shot-/empty-poll-Härtung zunächst rot reproduziert;
-- [x] Funktionshead `7b1ef3111bb516bb5d21bfacdd656d28b9f3a590`:
-  Syntax, vollständige Tests und Paketbuild grün, Actions-Lauf `30578039473`;
-- [x] finaler Head `a31b8d01bee2214ad7031182353906af9e9148a8`:
-  GitHub Actions, qlty und CodeRabbit grün; keine offenen Reviewthreads;
-- [x] PR #8 per Squash mit erwarteter Head-SHA gemergt;
-- [x] Main-Commit `01c791c252547c3766edfae97f2628a5c3cf6183`.
-
-## Aktiver Cross-Repository-Schnitt PR-HD-08b / TB-HD-01
+## Aktiver TeeBotus-Cutover: PR #3
 
 Repository: `H234598/TeeBotus`  
-PR: `#2 feat: add History-Dispatcher provider v2 adapter foundation`  
-Branch: `codex/history-dispatcher-provider-v2`
+Branch: `codex/history-dispatcher-provider-v2-cutover`  
+Aktuell geprüfter Head: `ea44a025176ddef92154f37e64340048e6baf18c`
 
-### Adaptergrundlage
+### Bereits umgesetzt
 
-- [x] semantisch identischen, secretfreien Provider-v2-Fixture-Korpus in
-  TeeBotus angelegt;
-- [x] explizite Request-IDs im Unix-Socket-Client implementiert;
-- [x] Claimresponse auf Schema, Provider, Target, Capability, Worker, Binding,
-  Token, Payload und Recipientlisten fail-closed validiert;
-- [x] Renew, dynamische opaque Recipientregistrierung, Recipientresultate,
-  Completion und Heartbeat implementiert;
-- [x] separaten verschlüsselten `ProviderCallbackSpool` implementiert;
-- [x] AES-256-GCM, separaten per-instance Secret-Purpose, Instanzbindung als
-  AAD, owner-only Dateien und atomaren Replayvertrag umgesetzt;
-- [x] Claimtoken im Spool nicht im Klartext gespeichert;
-- [x] bestehende Legacy-Bridge-Methoden und Legacy-Callback-Spool unverändert
-  kompatibel gehalten;
-- [x] fokussierten Bridge-/Provider-v2-Lauf `30579312585` grün gemacht;
-- [x] Provider-Test in das vollständige Plan2-Testinventar aufgenommen;
-- [x] unabhängige one-shot-FD-Reuse-Fixture im Runtime-Maintenance-Test
-  deterministisch korrigiert;
-- [x] qlty und CodeRabbit auf dem bereinigten finalen Head grün;
-- [ ] vollständigen TeeBotus-Gesamtlauf `30580563598` grün abschließen;
-- [ ] PR #2 aus Draft nehmen und gegen exakte Head-SHA mergen.
-
-## Gestapelter Folgeschnitt TB-HD-02-provider-v2-cutover
-
-Repository: `H234598/TeeBotus`  
-PR: `#3 test: define provider v2 dispatch worker cutover`  
-Branch: `codex/history-dispatcher-provider-v2-cutover`
-
-### Provider-v2-Batchworker
-
-- [x] Callback-Spool vor jedem neuen Claim flushen;
-- [x] bei unresolved Callback-Spool alle neuen Claims und Sends blockieren;
-- [x] ohne routbare Recipientrefs keinen Claim anfordern;
-- [x] dynamische Recipientrefs registrieren;
-- [x] bereits erfolgreiche Recipientrefs auslassen;
+- [x] expliziten Modus `TEEBOTUS_HISTORY_DISPATCHER_MODE=provider_v2` ergänzt;
+- [x] `legacy`, `shadow` und `bridge` unverändert gelassen;
+- [x] kein automatischer Fallback bei Fehlern des Provider-v2-Pfads;
+- [x] verschlüsselten Callback-Spool vor neuen Claims flushen;
+- [x] unresolved Spool blockiert alle neuen Claims und Sends;
+- [x] private routbare Empfänger vor dem Claim auflösen;
+- [x] ohne routbare Empfänger keinen Claim anfordern;
+- [x] dynamische opaque Recipientrefs registrieren;
+- [x] erfolgreiche und `possible_duplicate`-Recipients nicht erneut senden;
 - [x] Lease vor jedem offenen Transport verlängern;
-- [x] Transportfehler als Recipientresultat melden statt Prozessabbruch;
 - [x] Recipientresultate vor Targetcompletion persistieren;
-- [x] gespulte Recipientresultate und gespulte Completion fail-closed blockieren;
-- [x] stabile phasen-/Target-/Attempt-gebundene Request-IDs verwenden;
-- [x] Workerheartbeats vor und nach dem Batch senden;
-- [x] `possible_duplicate` niemals erneut senden;
-- [x] fokussierten Bridge-/Worker-/Legacy-Kompatibilitätslauf
-  `30580145725` grün gemacht;
-- [ ] Foundation-PR #2 mergen und Cutover-Branch sauber auf TeeBotus-`main`
-  neu aufbauen;
-- [ ] Worker-/Fault-Tests in das vollständige Plan2-Testinventar aufnehmen;
-- [ ] tatsächlichen `codex-history`-Dispatchloop in einem expliziten
-  Provider-v2-Modus anbinden;
-- [ ] private Route vor Claim, Sendadapter, Claim-Rebind und
-  Crash-after-Accept-Reconciliation vollständig testen;
-- [ ] qlty, CodeRabbit und vollständige TeeBotus-Actions grün;
-- [ ] Cutover-PR mergen.
+- [x] gespulte Recipient- oder Completioncallbacks blockieren den Batch;
+- [x] phasen-, Target- und Attempt-gebundene Request-IDs verwenden;
+- [x] Heartbeats vor und nach dem Batch senden;
+- [x] Claim-Payload begrenzt in das bestehende Telegram-Anhangformat übersetzen;
+- [x] rohe Telegram-Message-Refs vor zentraler Persistenz hashen;
+- [x] fokussierte Worker-/Bridge-/Legacy-Kompatibilitätstests grün.
 
-## Bewusste Schnittgrenze
+### Blockierender Langzeitausfallfall
 
-Der History-Dispatcher-Providervertrag ist produktiv vorhanden, sendet aber
-selbst keine Telegramnachricht. TeeBotus besitzt bereits die sichere
-Adaptergrundlage, der bestehende `legacy`/`shadow`/`bridge`-Betrieb bleibt jedoch
-bis zum vollständigen Cutover-/Fault-Korpus unverändert.
+Nach Telegram-Accept kann der verschlüsselte Callback länger als die Claim-Lease
+im Spool liegen. Der alte Claimtoken ist danach korrekt ungültig. Ohne gezielten
+Reclaim könnte der Worker nur dauerhaft fail-closed blockieren oder unsicher
+erneut senden. Deshalb bleibt TeeBotus PR #3 Draft, bis der folgende
+History-Dispatcher-Reclaimvertrag gemergt und im Spool-Rebind konsumiert ist.
 
-Es gibt weiterhin:
+## Aktiver History-Dispatcher-Schnitt PR-HD-08c / PR #10
 
-- keinen automatischen Cross-Provider-Fallback;
-- keinen Klartext-Claimtoken im Spool;
-- keinen erneuten Send für erfolgreiche oder `possible_duplicate`-Recipients;
-- keinen nativen Bot-API-Client im History-Dispatcher;
-- keinen Appletzugriff auf Claims oder Credentials.
+Branch: `codex/provider-v2-target-reclaim`
 
-## Nächste Schritte
+### Neuer Vertrag
 
-1. TeeBotus-Foundation-Gesamtlauf abschließen und PR #2 mergen;
-2. gestapelten Cutover-PR auf den gemergten TeeBotus-Mainstand neu aufbauen;
-3. `dispatch_codex_history_outbox` über den getesteten Provider-v2-Worker
-   anbinden, ohne Legacy-Fallback;
-4. Crash-after-Accept, Claimablauf/Rebind, Hänger, Rate-Limit, Oversize und
-   Recipient-Partial-Fault-Korpus grün machen;
-5. TeeBotus-Cutover mergen;
-6. anschließend PR-HD-09 für den nativen History-Dispatcher-Telegramworker mit
-   Secret-Service-Credentials, Bot-API, Formatter und Rate-Limit beginnen.
+- [x] additive Operation `provider.v2.reclaim` in Provider-API, Fixture und feste
+  Same-User-Socket-Allowlist aufgenommen;
+- [x] Reclaim verlangt exakte `target_delivery_id`, Provider, Worker,
+  Capability, `previous_attempt_no` und Lease;
+- [x] Reclaim ist ausschließlich für Callback-/Completion-Reconciliation
+  bestimmt und liefert `reconciliation_only=true`;
+- [x] aktive Claims werden nicht gestohlen;
+- [x] terminale Targets werden nicht wieder geöffnet;
+- [x] Provider-/Capability-/Binding-Mismatch liefert keinen Claim;
+- [x] stale Attemptnummern werden abgewiesen;
+- [x] abgelaufener Claim erzeugt einen neuen Attempt und neuen Token;
+- [x] alte offene Attemptzeile wird als `reclaimed_expired` abgeschlossen;
+- [x] verschlüsselte Payload sowie erfolgreiche und offene Recipientrefs bleiben
+  erhalten;
+- [x] Reclaimtoken ist one-shot und wird nicht in `response_json` gespeichert;
+- [x] identischer tokenhaltiger Replay ergibt `idempotency_in_progress`;
+- [x] leere Reclaimantworten sind tokenfrei und sicher cachebar;
+- [x] kein Cross-Provider-Reclaim.
+
+### TDD- und Gateevidenz
+
+- [x] Test-only-Head `53b9a36d08f67af60fe69021a6cde7e51b5dc76a`
+  rot verifiziert: sechs Reclaimtests scheiterten ausschließlich an der fehlenden
+  Operation; Actions-Lauf `30585638088`;
+- [x] Store-, API-, Socket-, one-shot- und Empty-Replay-Vertrag implementiert;
+- [x] temporäre Patchinfrastruktur nach Anwendung entfernt;
+- [x] vollständige Syntax-, Test- und Paketbuildkette auf Head
+  `41bf2030600cc935b27afa82f2e4db9527ec0f17` grün; Actions-Lauf
+  `30585978176`;
+- [ ] Control-Protokoll, Providervertrag, README und Telegram-Addendum final
+  pflegen;
+- [ ] GitHub Actions, qlty und CodeRabbit auf finalem Dokumentationshead grün;
+- [ ] alle Reviewthreads bearbeiten und lösen;
+- [ ] PR #10 aus Draft nehmen und mit erwarteter Head-SHA mergen.
+
+## Nach dem Reclaim-Merge
+
+1. TeeBotus-Client und Fixture um `provider.v2.reclaim` erweitern;
+2. verschlüsselte Spool-Envelopes um Target, Provider, Worker, Capability und
+   vorherige Attemptnummer für einen sicheren Rebind ergänzen;
+3. bei abgelaufenem Claim gezielt dieselbe Target-Delivery reclaimen;
+4. Spoolatomar auf neuen Claimtoken, neue Attemptnummer und neue Request-ID
+   umschreiben;
+5. exakt den ursprünglichen Recipient-/Completioncallback replayen;
+6. kein Telegram-Send im `reconciliation_only`-Pfad;
+7. Crash-after-Accept-, langer Ausfall-, stale Rebind-, Cross-Provider- und
+   Doppelversandtests grün machen;
+8. TeeBotus PR #3 erst danach mergen.
+
+## Nachfolgende Produktschnitte
+
+- produktiver Config-v2-Writer und revisionsgesicherter Settingseditor;
+- native Credentialprofile und write-only Secret-Service-Tokenoperationen;
+- PR-HD-09-native-telegram-worker mit Bot-API, Formatter, Segmentierung,
+  `retry_after`, Rate-Limit und systemd-Heartbeatloop;
+- gemeinsamer Fault-Korpus und getrennte TeeBotus-/Native-Canaries;
+- Cinnamon-Settingsschalter erst auf vollständig vorhandener Backendgrenze.
 
 ## Pflegevorgabe
 

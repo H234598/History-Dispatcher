@@ -158,6 +158,7 @@ def test_control_protocol_is_versioned_bounded_and_allowlisted() -> None:
         "migration.import_legacy",
         "maintenance.prune",
         "provider.v2.claim",
+        "provider.v2.reclaim",
         "provider.v2.renew",
         "provider.v2.register_recipients",
         "provider.v2.record_recipients",

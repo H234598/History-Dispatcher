@@ -17,13 +17,9 @@ Andere UIDs werden vor dem Requesthandling verworfen.
 
 ## Framing
 
-Jede Nachricht besteht aus:
-
-1. einem unsigned 4-Byte-Big-Endian-Längenfeld;
-2. exakt so vielen UTF-8-Bytes mit einem JSON-Dokument.
-
-Frames mit Länge `0`, einer Länge oberhalb des konfigurierten Limits,
-abgeschnittenem Inhalt, ungültigem UTF-8 oder ungültigem JSON werden verworfen.
+Jede Nachricht besteht aus einem unsigned 4-Byte-Big-Endian-Längenfeld und exakt
+so vielen UTF-8-Bytes mit einem JSON-Dokument. Leere, übergroße, abgeschnittene
+oder ungültige Frames werden verworfen.
 
 ## Request
 
@@ -31,7 +27,7 @@ abgeschnittenem Inhalt, ungültigem UTF-8 oder ungültigem JSON werden verworfen
 {
   "protocol_version": 1,
   "request_id": "opaque-id",
-  "operation": "provider.v2.claim",
+  "operation": "provider.v2.reclaim",
   "body": {}
 }
 ```
@@ -91,6 +87,7 @@ audit.query
 migration.import_legacy
 maintenance.prune
 provider.v2.claim
+provider.v2.reclaim
 provider.v2.renew
 provider.v2.register_recipients
 provider.v2.record_recipients
@@ -139,16 +136,27 @@ Für jede solche Request-ID gilt:
    Reservierung offen und der Client erhält `idempotency_persist_failed`.
 8. Retention erfolgt ausschließlich über `maintenance.prune`.
 
-## Sensible One-shot-Mutation `provider.v2.claim`
+## Sensible One-shot-Mutationen
 
-Ein erfolgreicher Claim kann einen geheimen `claim_token` enthalten. Eine solche
-Antwort wird nie in `response_json` gespeichert. Der identische Replay ergibt
-`idempotency_in_progress`; ein abweichender Replay `idempotency_conflict`.
-Dadurch entstehen weder zweiter Attempt noch zweiter Token.
+```text
+provider.v2.claim
+provider.v2.reclaim
+```
 
-Eine erfolgreiche Antwort mit `claims: []` ist tokenfrei und wird normal
-dauerhaft gecacht. Reine Validierungsfehler geben ihre exakte noch leere
-Reservierung frei; abgeschlossene Antworten können dadurch nicht gelöscht
+Eine erfolgreiche Antwort mit mindestens einem Claim enthält einen geheimen
+`claim_token`. Sie wird nie in `idempotency_results.response_json` gespeichert.
+Der identische Replay ergibt `idempotency_in_progress`; ein abweichender Replay
+`idempotency_conflict`. Dadurch entstehen weder zweiter Attempt noch zweiter
+Token.
+
+Eine erfolgreiche Antwort mit `claims: []` ist tokenfrei und wird dauerhaft
+gecached. Reine Validierungsfehler geben ihre exakte noch leere Reservierung
+frei; abgeschlossene Antworten können dadurch nicht gelöscht werden.
+
+`provider.v2.reclaim` ist zusätzlich auf reine Callback-/Completion-
+Reconciliation begrenzt. Ein erfolgreicher Eintrag trägt
+`reconciliation_only=true`, bindet exakt eine Target-Delivery und darf von einem
+Transportworker nicht als Autorisierung für einen neuen Send interpretiert
 werden.
 
 ## Evolutionsregel

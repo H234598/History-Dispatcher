@@ -16,8 +16,8 @@ Service key.
 - [`docs/migration-v2.md`](docs/migration-v2.md) — explicit DB-v2 migration;
 - [`docs/delivery-store-v3.md`](docs/delivery-store-v3.md) — provider-bound
   routes, targets, recipients, claims, leases and attempts;
-- [`docs/provider-api-v2.md`](docs/provider-api-v2.md) — versioned external
-  worker API, one-shot claim tokens and shared provider fixture;
+- [`docs/provider-api-v2.md`](docs/provider-api-v2.md) — external worker API,
+  one-shot tokens, targeted callback reclaim and shared provider fixture;
 - [`docs/status-v2-health.md`](docs/status-v2-health.md) — redacted Health API;
 - [`docs/contracts/status-snapshot-v2.md`](docs/contracts/status-snapshot-v2.md)
   — owner-only additive status snapshot;
@@ -89,6 +89,7 @@ The additive provider-v2 Same-User-Socket operations are:
 
 ```text
 provider.v2.claim
+provider.v2.reclaim
 provider.v2.renew
 provider.v2.register_recipients
 provider.v2.record_recipients
@@ -96,8 +97,13 @@ provider.v2.complete
 provider.v2.heartbeat
 ```
 
-All require a Request-ID. Token-bearing claims are one-shot and never cached;
-token-free empty polls are safely replayable. See
+All require a Request-ID. Token-bearing normal and reconciliation claims are
+one-shot and never cached; token-free empty polls are safely replayable.
+
+`provider.v2.reclaim` targets exactly one expired delivery and returns
+`reconciliation_only=true`. It exists so an encrypted Recipient- or
+Completioncallback can be rebound to a new token after a long outage. A worker
+must never use such a claim for a new Telegram send. See
 [`docs/provider-api-v2.md`](docs/provider-api-v2.md).
 
 A native Bot-API worker and write-only Secret-Service credential operations are
