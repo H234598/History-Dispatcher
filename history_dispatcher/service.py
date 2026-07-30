@@ -21,6 +21,7 @@ from .idempotency import IdempotencyConflict, IdempotencyInProgress, Idempotency
 from .delivery_store import DeliveryStore
 from .provider_api_v2 import (
     PROVIDER_API_OPERATIONS,
+    PROVIDER_API_SCHEMA_VERSION,
     ProviderApiV2,
     ProviderApiValidationError,
 )
@@ -254,9 +255,22 @@ class DispatcherService:
                         "idempotency_persist_failed",
                         "one-shot request reservation could not be released",
                     )
-            # A successful or operationally ambiguous claim response contains a
-            # secret token and is deliberately never persisted in response_json.
-            return response
+                return response
+
+            response_data = response.get("data")
+            cacheable_empty_claim = (
+                operation_exception is None
+                and response.get("ok") is True
+                and isinstance(response_data, dict)
+                and response_data.get("ok") is True
+                and response_data.get("schema_version")
+                == PROVIDER_API_SCHEMA_VERSION
+                and response_data.get("claims") == []
+            )
+            if not cacheable_empty_claim:
+                # Token-bearing or operationally ambiguous claims remain one-shot
+                # and are deliberately never persisted in response_json.
+                return response
 
         if reservation_active:
             try:
