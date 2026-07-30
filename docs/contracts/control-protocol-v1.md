@@ -31,7 +31,7 @@ abgeschnittenem Inhalt, ungültigem UTF-8 oder ungültigem JSON werden verworfen
 {
   "protocol_version": 1,
   "request_id": "opaque-id",
-  "operation": "status.get_redacted",
+  "operation": "provider.v2.claim",
   "body": {}
 }
 ```
@@ -39,6 +39,7 @@ abgeschnittenem Inhalt, ungültigem UTF-8 oder ungültigem JSON werden verworfen
 - `operation` muss in der festen Allowlist stehen;
 - `request_id` ist für idempotente Mutationen auf 128 Zeichen begrenzt und darf
   keine Steuerzeichen enthalten;
+- alle `provider.v2.*`-Operationen verlangen eine nicht leere Request-ID;
 - ein fehlendes `body` entspricht `{}`;
 - ein vorhandenes `body` muss ein JSON-Objekt sein;
 - nicht endliche JSON-Zahlen werden mit `invalid_request` abgewiesen.
@@ -89,14 +90,22 @@ admin.execute
 audit.query
 migration.import_legacy
 maintenance.prune
+provider.v2.claim
+provider.v2.renew
+provider.v2.register_recipients
+provider.v2.record_recipients
+provider.v2.complete
+provider.v2.heartbeat
 ```
 
-`status.get_redacted` ist eine additive Read-only-Operation. Sie liefert eine
-Antwort der Form `{ "version": 2, "status": { ... } }`. `status.get`,
-`health.get` und `report.get` behalten während des Applet-Cutovers ihre
-v1-Antwort unverändert.
+`status.get_redacted` ist additive Read-only-Operation. Sie liefert
+`{ "version": 2, "status": { ... } }`; die v1-Statusoperationen bleiben
+unverändert.
 
-## Idempotente Mutationen
+Die Provider-v2-Operationen sind additive Same-User-Workeroperationen. Ihr
+vollständiger Body-/Responsevertrag steht in `docs/provider-api-v2.md`.
+
+## Dauerhaft idempotente Mutationen
 
 ```text
 history.append
@@ -109,6 +118,11 @@ collector.collect
 admin.execute
 migration.import_legacy
 maintenance.prune
+provider.v2.renew
+provider.v2.register_recipients
+provider.v2.record_recipients
+provider.v2.complete
+provider.v2.heartbeat
 ```
 
 Für jede solche Request-ID gilt:
@@ -119,15 +133,27 @@ Für jede solche Request-ID gilt:
 3. Gespeichert wird SHA-256 über die kanonische Struktur `{operation, body}`.
 4. Dieselbe ID mit identischer Operation und identischem Body liefert die
    dauerhaft gespeicherte Antwort.
-5. Eine abweichende Wiederverwendung wird mit `idempotency_conflict` abgewiesen.
-6. Eine Reservierung ohne durable Antwort wird mit `idempotency_in_progress`
-   abgewiesen.
-7. Kann die Antwort nach einer Mutation nicht persistiert werden, bleibt die
+5. Abweichende Wiederverwendung ergibt `idempotency_conflict`.
+6. Reservierung ohne durable Antwort ergibt `idempotency_in_progress`.
+7. Kann die Antwort nach der Mutation nicht persistiert werden, bleibt die
    Reservierung offen und der Client erhält `idempotency_persist_failed`.
 8. Retention erfolgt ausschließlich über `maintenance.prune`.
+
+## Sensible One-shot-Mutation `provider.v2.claim`
+
+Ein erfolgreicher Claim kann einen geheimen `claim_token` enthalten. Eine solche
+Antwort wird nie in `response_json` gespeichert. Der identische Replay ergibt
+`idempotency_in_progress`; ein abweichender Replay `idempotency_conflict`.
+Dadurch entstehen weder zweiter Attempt noch zweiter Token.
+
+Eine erfolgreiche Antwort mit `claims: []` ist tokenfrei und wird normal
+dauerhaft gecacht. Reine Validierungsfehler geben ihre exakte noch leere
+Reservierung frei; abgeschlossene Antworten können dadurch nicht gelöscht
+werden.
 
 ## Evolutionsregel
 
 Neue inkompatible Request-/Responseformen benötigen eine neue Majorversion.
-Additive Read-only-Operationen dürfen innerhalb von v1 ergänzt werden, wenn alte
-Operationen semantisch und strukturell unverändert bleiben.
+Additive Operationen dürfen innerhalb von v1 ergänzt werden, wenn alte
+Operationen semantisch und strukturell unverändert bleiben und der neue
+Operationsvertrag separat versioniert ist.

@@ -18,6 +18,13 @@ from .config import DispatcherConfig, apply_safe_values, config_revision, load_c
 from .crypto import SecretServiceKeyProvider
 from .protocol import ProtocolError, encode_message, read_message
 from .idempotency import IdempotencyConflict, IdempotencyInProgress, IdempotencyStore
+from .delivery_store import DeliveryStore
+from .provider_api_v2 import (
+    PROVIDER_API_OPERATIONS,
+    PROVIDER_API_SCHEMA_VERSION,
+    ProviderApiV2,
+    ProviderApiValidationError,
+)
 from .store import DispatcherStore
 from .status_api_v2 import build_redacted_status_response
 from .status_runtime_v2 import build_runtime_health_status
@@ -33,12 +40,16 @@ OPERATIONS = (
     "collector.collect", "admin.preview", "admin.execute", "audit.query",
     "migration.import_legacy",
     "maintenance.prune",
+    *PROVIDER_API_OPERATIONS,
 )
 IDEMPOTENT_OPERATIONS = frozenset({
     "history.append", "dispatch.claim", "dispatch.complete", "dispatch.retry", "delivery.record",
     "config.apply", "collector.collect", "admin.execute", "migration.import_legacy",
-    "maintenance.prune",
+    "maintenance.prune", "provider.v2.renew", "provider.v2.register_recipients",
+    "provider.v2.record_recipients", "provider.v2.complete", "provider.v2.heartbeat",
 })
+ONE_SHOT_SENSITIVE_OPERATIONS = frozenset({"provider.v2.claim"})
+PROVIDER_REQUEST_ID_REQUIRED = frozenset(PROVIDER_API_OPERATIONS)
 
 
 def _timestamp() -> str:
@@ -62,6 +73,7 @@ class DispatcherService:
         self.key_provider = key_provider or SecretServiceKeyProvider()
         self.store = DispatcherStore(config.database_path, self.key_provider)
         self.idempotency = IdempotencyStore(config.database_path)
+        self._provider_api: ProviderApiV2 | None = None
         self._lock = threading.RLock()
         self._started_at = _timestamp()
         self._last_operation = ""
@@ -70,6 +82,13 @@ class DispatcherService:
         self._last_delivery: dict[str, Any] = {}
         self._tokens: dict[str, tuple[list[str], str, float]] = {}
         self._write_snapshot()
+
+    def _provider_worker_api(self) -> ProviderApiV2:
+        if self._provider_api is None:
+            self._provider_api = ProviderApiV2(
+                DeliveryStore(self.config.database_path, self.key_provider)
+            )
+        return self._provider_api
 
     def _status(self) -> dict[str, Any]:
         status = self.store.status()
@@ -166,9 +185,16 @@ class DispatcherService:
         if operation not in OPERATIONS:
             return self._error("unknown_operation", "unknown operation")
 
+        if operation in PROVIDER_REQUEST_ID_REQUIRED and not request_id:
+            return self._error(
+                "invalid_request_id",
+                "provider v2 mutations require a request_id",
+            )
+
         fingerprint = ""
         reservation_active = False
-        if operation in IDEMPOTENT_OPERATIONS and request_id:
+        operation_exception: Exception | None = None
+        if operation in (IDEMPOTENT_OPERATIONS | ONE_SHOT_SENSITIVE_OPERATIONS) and request_id:
             if len(request_id) > 128 or any(ord(char) < 0x20 for char in request_id):
                 return self._error("invalid_request_id", "request_id is invalid")
             try:
@@ -199,6 +225,7 @@ class DispatcherService:
                 self._write_snapshot()
             response: dict[str, Any] = {"ok": True, "data": result}
         except Exception as exc:  # API boundary: never expose internal traceback.
+            operation_exception = exc
             with self._lock:
                 self._last_operation = operation
                 self._last_error = f"{type(exc).__name__}: {str(exc)[:240]}"
@@ -209,6 +236,41 @@ class DispatcherService:
                     # overwrite the operation's bounded error response.
                     pass
             response = self._error("operation_failed", str(exc))
+
+        if reservation_active and operation in ONE_SHOT_SENSITIVE_OPERATIONS:
+            if isinstance(operation_exception, ProviderApiValidationError):
+                try:
+                    self.idempotency.release(
+                        request_id,
+                        operation,
+                        fingerprint,
+                    )
+                except IdempotencyConflict:
+                    return self._error(
+                        "idempotency_conflict",
+                        "request_id was already used with a different operation or body",
+                    )
+                except Exception:
+                    return self._error(
+                        "idempotency_persist_failed",
+                        "one-shot request reservation could not be released",
+                    )
+                return response
+
+            response_data = response.get("data")
+            cacheable_empty_claim = (
+                operation_exception is None
+                and response.get("ok") is True
+                and isinstance(response_data, dict)
+                and response_data.get("ok") is True
+                and response_data.get("schema_version")
+                == PROVIDER_API_SCHEMA_VERSION
+                and response_data.get("claims") == []
+            )
+            if not cacheable_empty_claim:
+                # Token-bearing or operationally ambiguous claims remain one-shot
+                # and are deliberately never persisted in response_json.
+                return response
 
         if reservation_active:
             try:
@@ -232,6 +294,8 @@ class DispatcherService:
             return {"protocol_version": 1, "operations": list(OPERATIONS), "max_frame_bytes": self.config.frame_limit_bytes}
         if operation == "status.get_redacted":
             return self._status_v2()
+        if operation in PROVIDER_API_OPERATIONS:
+            return self._provider_worker_api().dispatch(operation, body)
         if operation in {"health.get", "status.get", "report.get"}:
             return self._status()
         if operation == "config.get":
