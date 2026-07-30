@@ -1,19 +1,21 @@
 # Planaddendum: selbstständiger Telegram-Dispatch
 
 **Datum:** 28. Juli 2026  
-**Stand:** 30. Juli 2026  
+**Stand:** 30. Juli 2026, 23:59 Europe/Berlin  
 **Status:** verbindlich / in sequenzieller Umsetzung
 
 ## 1. Zieländerung
 
-Der History-Dispatcher unterstützt künftig zwei explizit auswählbare
-Telegram-Transportwege unter derselben zentralen Routing- und Delivery-Semantik:
+Der History-Dispatcher unterstützt zwei explizit auswählbare Telegramwege unter
+demselben zentralen Routing-, Claim-, Recipient-, Attempt- und
+Reconciliationvertrag:
 
 - Dispatch über TeeBotus;
 - selbstständiger Dispatch durch den History-Dispatcher.
 
-Das Cinnamon-Applet bleibt reiner Same-User-Client ohne Netzwerkzugriff oder
-Credentials. Alle Events werden vor Routing verschlüsselt persistiert.
+Das Cinnamon-Applet bleibt reiner Same-User-Client ohne Netzwerkzugriff,
+Claims, Bot-Tokens oder Chat-IDs. Events werden vor Routing verschlüsselt
+persistiert.
 
 ## 2. Verbindliche Anforderungen
 
@@ -37,6 +39,13 @@ Credentials. Alle Events werden vor Routing verschlüsselt persistiert.
   `possible_duplicate`, Rate-Limit und Reconciliation.
 - **`REQ-TG-010` – MUSS:** Beide Provider bestehen denselben versionierten
   Contract- und Fault-Korpus.
+- **`REQ-TG-011` – MUSS:** Ein nach externem Accept gespulter Callback muss nach
+  Ablauf der ursprünglichen Claim-Lease gezielt an dieselbe Target-Delivery und
+  deren aktuellen Attempt neu gebunden werden können, ohne einen neuen
+  Telegram-Send auszulösen.
+- **`REQ-TG-012` – MUSS:** Target-Reclaim prüft unveränderlichen Provider,
+  Capability, vorherige Attemptnummer und Terminalzustand; aktive Claims dürfen
+  nicht gestohlen und stale Rebinds nicht akzeptiert werden.
 
 `REQ-ROUTE-014` lautet: Der Router bleibt zentral im History-Dispatcher;
 Telegram wird über den gewählten Provider ausgeliefert, Vault bleibt ein
@@ -66,16 +75,24 @@ Native Zusatzfelder:
 
 ## 4. Wiederverwendung aus TeeBotus
 
-Aktueller Referenzstand:
+Gemergte Adapterreferenz:
 
 ```text
-H234598/TeeBotus@aaa8c646ced7f9a818d18d3e11cae6859a258b25
+H234598/TeeBotus@5989b5129808486a9be272324285e6b5a02e76ab
+```
+
+Aktiver Cutover:
+
+```text
+H234598/TeeBotus PR #3
+codex/history-dispatcher-provider-v2-cutover
 ```
 
 Referenzierte Verträge/Symbole:
 
 - `HistoryDispatcherClient` und Same-User-Socketframing;
 - `HistoryDispatcherBridge`;
+- verschlüsselter `ProviderCallbackSpool`;
 - `dispatch_codex_history_outbox`;
 - `_dispatch_codex_history_outbox_via_dispatcher`;
 - `_history_dispatcher_report_recipient_results`;
@@ -95,8 +112,13 @@ bleiben bis zu einer expliziten Root-Lizenzfestlegung vermieden.
 - [x] **PR-HD-05** – Route Planner, Claims, Leases, Attempts und Aggregation;
 - [x] **PR-HD-06** – Config-v2-Vertrags- und Previewgrenze;
 - [x] **PR-HD-07** – redigierte Status-v2-API und Snapshot;
-- [ ] **PR-HD-08a** – History-Dispatcher Provider-v2-Socket/API-Vertrag;
-- [ ] **PR-HD-08b** – TeeBotus-Adapter gegen denselben Vertrag;
+- [x] **PR-HD-08a** – History-Dispatcher Provider-v2-Socket/API-Vertrag;
+- [x] **PR-HD-08b / TB-HD-01** – TeeBotus-Adaptergrundlage und verschlüsselter
+  Provider-Callback-Spool;
+- [ ] **PR-HD-08c** – gezielter Reclaim abgelaufener Providerclaims für reine
+  Callback-Reconciliation;
+- [ ] **TB-HD-02** – produktiver TeeBotus-Provider-v2-Cutover mit Rebind und
+  Crash-after-Accept-Fault-Korpus;
 - [ ] **PR-HD-09** – nativer Telegramworker mit Secret Service, Bot-API,
   Formatter, Batching, Rate-Limit und Reconciliation.
 
@@ -114,29 +136,60 @@ bleiben bis zu einer expliziten Root-Lizenzfestlegung vermieden.
 - [ ] `TG-E-003` Telegram-`retry_after` im echten Adapter; Store-Backoff,
   Jitter und Max Attempts sind vorhanden.
 - [x] `TG-E-004` Partial Results und `possible_duplicate` im Store persistiert.
-- [ ] `TG-E-005` Transport-Callback-/Attempt-Reconciliation.
+- [x] `TG-E-005a` Provider-v2-Recipient-/Completioncallbacks und verschlüsselten
+  Replay-Spool implementiert.
+- [x] `TG-E-005b` gezielten History-Dispatcher-Reclaim für abgelaufene Claims
+  implementiert und testet aktive, terminale, stale und Cross-Provider-Fälle.
+- [ ] `TG-E-005c` TeeBotus-Spool atomar auf neuen Reclaimtoken/Attempt umschreiben
+  und ursprünglichen Callback ohne Send replayen.
 - [ ] `TG-E-006` nativer systemd-Worker und Heartbeatloop.
 - [x] `TG-F-001a` versioniertes gemeinsames Provider-v2-Fixture im
   History-Dispatcher angelegt.
-- [ ] `TG-F-001b` denselben Fixture-Korpus im TeeBotus-Adapter konsumieren.
-- [ ] `TG-F-002` Crash-after-Accept, Rate-Limit, Hänger, Oversize und
-  Recipient-Partial-Tests beider echten Provider.
+- [x] `TG-F-001b` denselben semantischen Fixture-Korpus im TeeBotus-Adapter
+  konsumiert.
+- [ ] `TG-F-002` Crash-after-Accept, langer Ausfall, Rebind, Rate-Limit, Hänger,
+  Oversize und Recipient-Partial-Tests beider echten Provider.
 - [ ] `TG-G-001` Appletsettings-Schalter mit Backendrevision.
 - [x] `TG-G-002` redigierter Provider-, Credential- und Workerstatus als
   Backend-API und Snapshot; Appletdarstellung folgt separat.
 - [ ] `TG-H-001` getrennte TeeBotus-/Native-Canaries.
 - [ ] `TG-H-002` Canarynachweis ohne Cross-Provider-Doppelversand.
 
-## 7. Provider-v2-Zwischenstand
+## 7. Provider-v2-Reclaimvertrag
 
-Der History-Dispatcher besitzt jetzt den getesteten Socketvertrag für Claim,
-Renew, Recipientregistrierung, Recipientresultate, Completion und Heartbeat.
-Claimantworten mit Token sind one-shot und werden nicht im Idempotenzcache
-persistiert; leere Pollantworten sind sicher replaybar.
+Neue additive Operation:
 
-Noch offen ist der echte TeeBotus-Adapter, der seine privaten Adminrouten in
-opaque Recipientrefs übersetzt und Callback-/Spoolresultate über diesen Vertrag
-meldet.
+```text
+provider.v2.reclaim
+```
+
+Request:
+
+```json
+{
+  "target_delivery_id": "target_opaque",
+  "provider_id": "teebotus",
+  "worker_id": "teebotus-worker",
+  "capability_version": "history-dispatcher-telegram-v2",
+  "previous_attempt_no": 1,
+  "lease_seconds": 120
+}
+```
+
+Erfolgreicher Reclaim liefert einen neuen One-shot-Claimtoken und:
+
+```json
+{
+  "reconciliation_only": true
+}
+```
+
+Der neue Token darf ausschließlich zum Replay bereits entstandener
+Recipient-/Completioncallbacks verwendet werden. Der Worker darf aus einem
+`reconciliation_only`-Claim niemals einen neuen Telegram-Send ableiten.
+
+Leere Reclaimantworten sind tokenfrei und idempotent cachebar. Tokenhaltige
+Antworten bleiben one-shot und werden nicht in `response_json` persistiert.
 
 ## 8. Definition of Done
 
@@ -147,5 +200,7 @@ meldet.
 - [ ] Tokens und Chat-IDs existieren ausschließlich in der Credentialgrenze.
 - [x] Erfolgreiche Empfänger werden nicht erneut angeboten oder zurückgestuft.
 - [x] Unklare Accept-Fenster bleiben blockierend `possible_duplicate`.
+- [ ] Ein gespulter Callback kann nach Leaseablauf sicher regebunden und ohne
+  erneuten Telegram-Send abgeschlossen werden.
 - [ ] Beide echten Provider bestehen denselben Contract- und Fault-Korpus.
 - [ ] Appletentfernung oder Safe Mode beeinflusst keinen Telegramworker.
