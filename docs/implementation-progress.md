@@ -3,11 +3,11 @@
 **Planquelle:** `HISTORY_DISPATCHER_CINNAMON_APPLET_IMPLEMENTIERUNGSPLAN`, SHA-256 `a1f52c11117a063702f4cff008c9d24646f8f33a7540cdd1bf48ab220053ba0c`  
 **Telegram-Addendum:** `docs/implementation-plan-addendum-telegram.md`  
 **Ausgangsbasis:** `main@8f0bb05a540942e61c979a51bbaeca32d4308eb1`  
-**Aktuelle PR-Basis:** `main@2efc7c7f68225936c79d06745ef0645cb3ec5999`  
-**Aktueller Schnitt:** `PR-HD-08a-provider-v2-api`  
-**Branch:** `codex/teebotus-provider-v2`
+**Aktueller Main-Stand:** `01c791c252547c3766edfae97f2628a5c3cf6183`  
+**Aktiver Cross-Repository-Schnitt:** `PR-HD-08b / TB-HD-01-provider-v2-adapter-foundation`  
+**Folgeschnitt:** `TB-HD-02-provider-v2-cutover`
 
-## Gemergte Schnitte
+## Gemergte History-Dispatcher-Schnitte
 
 | Schnitt | Inhalt | Main-Commit |
 |---|---|---|
@@ -18,8 +18,9 @@
 | PR-HD-06 | Config-v2-Vertrags- und Previewgrenze | `278f9a3198a54cde7495b1a3ce4fb0c85dabc246` |
 | PR-HD-05 | providergebundener Route-/Delivery-Store | `74cec04ef6f06edf3ea3e5826f9fd4f3e5a1afc3` |
 | PR-HD-07 | redigierte Status-v2-API und Snapshot | `2efc7c7f68225936c79d06745ef0645cb3ec5999` |
+| PR-HD-08a | versionierte Provider-v2-Worker-API | `01c791c252547c3766edfae97f2628a5c3cf6183` |
 
-## Status PR-HD-08a
+## Abgeschlossener Schnitt PR-HD-08a
 
 ### Gemeinsamer Contract-Fixture-Korpus
 
@@ -59,34 +60,105 @@
   frei;
 - [x] erfolgreiche leere Claimantworten tokenfrei gecacht und sicher replaybar.
 
-### TDD- und Gateevidenz
+### Gate- und Mergeevidenz
 
 - [x] Test-only-Head `0458352b26fa1a2b9820c6a3732c0597226d5e4c`
   erwartungsgemäß rot wegen fehlendem `provider_api_v2`;
-- [x] erster vollständiger Providerpfad implementiert und grün gemacht;
-- [x] zusätzliche one-shot-/empty-poll-Tests zunächst rot reproduziert;
+- [x] one-shot-/empty-poll-Härtung zunächst rot reproduziert;
 - [x] Funktionshead `7b1ef3111bb516bb5d21bfacdd656d28b9f3a590`:
   Syntax, vollständige Tests und Paketbuild grün, Actions-Lauf `30578039473`;
-- [x] CodeRabbit auf dem Funktionshead grün;
-- [ ] GitHub Actions, qlty und CodeRabbit auf dem finalen Dokumentationshead grün;
-- [ ] alle finalen Reviewthreads bearbeitet und gelöst;
-- [ ] PR #8 aus Draft genommen und mit erwarteter Head-SHA gemergt.
+- [x] finaler Head `a31b8d01bee2214ad7031182353906af9e9148a8`:
+  GitHub Actions, qlty und CodeRabbit grün; keine offenen Reviewthreads;
+- [x] PR #8 per Squash mit erwarteter Head-SHA gemergt;
+- [x] Main-Commit `01c791c252547c3766edfae97f2628a5c3cf6183`.
+
+## Aktiver Cross-Repository-Schnitt PR-HD-08b / TB-HD-01
+
+Repository: `H234598/TeeBotus`  
+PR: `#2 feat: add History-Dispatcher provider v2 adapter foundation`  
+Branch: `codex/history-dispatcher-provider-v2`
+
+### Adaptergrundlage
+
+- [x] semantisch identischen, secretfreien Provider-v2-Fixture-Korpus in
+  TeeBotus angelegt;
+- [x] explizite Request-IDs im Unix-Socket-Client implementiert;
+- [x] Claimresponse auf Schema, Provider, Target, Capability, Worker, Binding,
+  Token, Payload und Recipientlisten fail-closed validiert;
+- [x] Renew, dynamische opaque Recipientregistrierung, Recipientresultate,
+  Completion und Heartbeat implementiert;
+- [x] separaten verschlüsselten `ProviderCallbackSpool` implementiert;
+- [x] AES-256-GCM, separaten per-instance Secret-Purpose, Instanzbindung als
+  AAD, owner-only Dateien und atomaren Replayvertrag umgesetzt;
+- [x] Claimtoken im Spool nicht im Klartext gespeichert;
+- [x] bestehende Legacy-Bridge-Methoden und Legacy-Callback-Spool unverändert
+  kompatibel gehalten;
+- [x] fokussierten Bridge-/Provider-v2-Lauf `30579312585` grün gemacht;
+- [x] Provider-Test in das vollständige Plan2-Testinventar aufgenommen;
+- [x] unabhängige one-shot-FD-Reuse-Fixture im Runtime-Maintenance-Test
+  deterministisch korrigiert;
+- [x] qlty und CodeRabbit auf dem bereinigten finalen Head grün;
+- [ ] vollständigen TeeBotus-Gesamtlauf `30580563598` grün abschließen;
+- [ ] PR #2 aus Draft nehmen und gegen exakte Head-SHA mergen.
+
+## Gestapelter Folgeschnitt TB-HD-02-provider-v2-cutover
+
+Repository: `H234598/TeeBotus`  
+PR: `#3 test: define provider v2 dispatch worker cutover`  
+Branch: `codex/history-dispatcher-provider-v2-cutover`
+
+### Provider-v2-Batchworker
+
+- [x] Callback-Spool vor jedem neuen Claim flushen;
+- [x] bei unresolved Callback-Spool alle neuen Claims und Sends blockieren;
+- [x] ohne routbare Recipientrefs keinen Claim anfordern;
+- [x] dynamische Recipientrefs registrieren;
+- [x] bereits erfolgreiche Recipientrefs auslassen;
+- [x] Lease vor jedem offenen Transport verlängern;
+- [x] Transportfehler als Recipientresultat melden statt Prozessabbruch;
+- [x] Recipientresultate vor Targetcompletion persistieren;
+- [x] gespulte Recipientresultate und gespulte Completion fail-closed blockieren;
+- [x] stabile phasen-/Target-/Attempt-gebundene Request-IDs verwenden;
+- [x] Workerheartbeats vor und nach dem Batch senden;
+- [x] `possible_duplicate` niemals erneut senden;
+- [x] fokussierten Bridge-/Worker-/Legacy-Kompatibilitätslauf
+  `30580145725` grün gemacht;
+- [ ] Foundation-PR #2 mergen und Cutover-Branch sauber auf TeeBotus-`main`
+  neu aufbauen;
+- [ ] Worker-/Fault-Tests in das vollständige Plan2-Testinventar aufnehmen;
+- [ ] tatsächlichen `codex-history`-Dispatchloop in einem expliziten
+  Provider-v2-Modus anbinden;
+- [ ] private Route vor Claim, Sendadapter, Claim-Rebind und
+  Crash-after-Accept-Reconciliation vollständig testen;
+- [ ] qlty, CodeRabbit und vollständige TeeBotus-Actions grün;
+- [ ] Cutover-PR mergen.
 
 ## Bewusste Schnittgrenze
 
-PR-HD-08a sendet keine Telegramnachricht. Er definiert und implementiert nur
-den sicheren Worker-/Storevertrag. TeeBotus bleibt bis zum gepaarten Adapter-PR
-auf seinem bisherigen Legacy-/Bridgepfad. Der native Telegramworker und seine
-Secret-Service-Credentials bleiben PR-HD-09.
+Der History-Dispatcher-Providervertrag ist produktiv vorhanden, sendet aber
+selbst keine Telegramnachricht. TeeBotus besitzt bereits die sichere
+Adaptergrundlage, der bestehende `legacy`/`shadow`/`bridge`-Betrieb bleibt jedoch
+bis zum vollständigen Cutover-/Fault-Korpus unverändert.
+
+Es gibt weiterhin:
+
+- keinen automatischen Cross-Provider-Fallback;
+- keinen Klartext-Claimtoken im Spool;
+- keinen erneuten Send für erfolgreiche oder `possible_duplicate`-Recipients;
+- keinen nativen Bot-API-Client im History-Dispatcher;
+- keinen Appletzugriff auf Claims oder Credentials.
 
 ## Nächste Schritte
 
-1. finale Gates und Merge von PR-HD-08a;
-2. gepaarter TeeBotus-PR `TB-HD-01-provider-v2-adapter`;
-3. TeeBotus nutzt Claimtoken, Lease, dynamische opaque Accountrefs,
-   Recipientresultate, Completion, Heartbeat und Callback-Spool;
-4. derselbe Fixture-Korpus läuft in beiden Repositorys;
-5. danach PR-HD-09 für den nativen Telegramworker.
+1. TeeBotus-Foundation-Gesamtlauf abschließen und PR #2 mergen;
+2. gestapelten Cutover-PR auf den gemergten TeeBotus-Mainstand neu aufbauen;
+3. `dispatch_codex_history_outbox` über den getesteten Provider-v2-Worker
+   anbinden, ohne Legacy-Fallback;
+4. Crash-after-Accept, Claimablauf/Rebind, Hänger, Rate-Limit, Oversize und
+   Recipient-Partial-Fault-Korpus grün machen;
+5. TeeBotus-Cutover mergen;
+6. anschließend PR-HD-09 für den nativen History-Dispatcher-Telegramworker mit
+   Secret-Service-Credentials, Bot-API, Formatter und Rate-Limit beginnen.
 
 ## Pflegevorgabe
 
