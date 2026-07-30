@@ -3,9 +3,9 @@
 **Planquelle:** `HISTORY_DISPATCHER_CINNAMON_APPLET_IMPLEMENTIERUNGSPLAN`, SHA-256 `a1f52c11117a063702f4cff008c9d24646f8f33a7540cdd1bf48ab220053ba0c`  
 **Telegram-Addendum:** `docs/implementation-plan-addendum-telegram.md`  
 **Ausgangsbasis:** `main@8f0bb05a540942e61c979a51bbaeca32d4308eb1`  
-**Aktuelle PR-Basis:** `main@74cec04ef6f06edf3ea3e5826f9fd4f3e5a1afc3`  
-**Aktueller Schnitt:** `PR-HD-07-status-v2-health`  
-**Branch:** `codex/status-v2-health`
+**Aktuelle PR-Basis:** `main@2efc7c7f68225936c79d06745ef0645cb3ec5999`  
+**Aktueller Schnitt:** `PR-HD-08a-provider-v2-api`  
+**Branch:** `codex/teebotus-provider-v2`
 
 ## Gemergte Schnitte
 
@@ -17,86 +17,76 @@
 | PR-HD-04 | dualer Telegram-Providervertrag | `9d3f9420805986720e458d18876539962eab893f` |
 | PR-HD-06 | Config-v2-Vertrags- und Previewgrenze | `278f9a3198a54cde7495b1a3ce4fb0c85dabc246` |
 | PR-HD-05 | providergebundener Route-/Delivery-Store | `74cec04ef6f06edf3ea3e5826f9fd4f3e5a1afc3` |
+| PR-HD-07 | redigierte Status-v2-API und Snapshot | `2efc7c7f68225936c79d06745ef0645cb3ec5999` |
 
-PR-HD-05 wurde nach Prüfung seines bereits vollständig grünen Heads nachträglich
-vor PR-HD-07 geschlossen. Damit basiert der Statusschnitt nun auf der im Plan
-vorgesehenen vollständigen Delivery-/Heartbeat-Persistenzgrenze.
+## Status PR-HD-08a
 
-## Status PR-HD-07
+### Gemeinsamer Contract-Fixture-Korpus
 
-### Typ- und Leakvertrag
+- [x] `tests/fixtures/provider-v2/contract.json` angelegt;
+- [x] Schema-Version `2`, Provider `teebotus`, Target `telegram` und Capability
+  `history-dispatcher-telegram-v2` eingefroren;
+- [x] künstliche opaque Recipient-/Message-Referenzen verwendet;
+- [x] Token- und Chat-ID-Leaknegative Tests ergänzt;
+- [x] Operationsreihenfolge für beide Repositoryadapter festgelegt.
 
-- [x] einheitliche Typen `HealthStatusV2`, `TelegramProviderStatus`,
-  `CredentialStatus` und `WorkerHealthStatus` implementiert;
-- [x] vorläufige Aliasnamen des ersten Drafts kompatibel gehalten;
-- [x] Provider auf `teebotus | history_dispatcher` begrenzt;
-- [x] Worker-, Zähler- und Zeitfelder begrenzt und validiert;
-- [x] rekursive Leakprüfung für Secret-, Token-, Chat-/Recipient-/Message- und
-  Payloadfelder implementiert;
-- [x] sensible Stringmuster, nicht endliches JSON, mehr als zwölf Ebenen, mehr
-  als 4096 Werte und mehr als 64 KiB fail-closed behandelt.
+### ProviderApiV2
 
-### Runtime-Health
+- [x] `provider.v2.claim` implementiert;
+- [x] `provider.v2.renew` implementiert;
+- [x] `provider.v2.register_recipients` implementiert;
+- [x] `provider.v2.record_recipients` implementiert;
+- [x] `provider.v2.complete` implementiert;
+- [x] `provider.v2.heartbeat` implementiert;
+- [x] strikte Feldallowlists, Body-/Array-/Zahlen-/Jittergrenzen und endliches
+  JSON implementiert;
+- [x] Provider-/Capability-Mismatch ohne Fallback getestet;
+- [x] alle Provideroperationen in die feste Same-User-Socket-Allowlist
+  aufgenommen und Request-ID-pflichtig gemacht.
 
-- [x] Queuezähler aus dem bestehenden v1-Store eingebunden;
-- [x] Deliveryzustände read-only und gruppiert aus `target_deliveries` gelesen;
-- [x] höchstens 64 Workerheartbeats read-only ausgegeben;
-- [x] Vor-Migrationsdatenbanken ohne v2/v3-Tabellen sicher unterstützt;
-- [x] malformed Details auf `unknown` reduziert;
-- [x] unbekannte Providerwerte neutralisiert;
-- [x] strukturell ungültige Workerzeilen ausgelassen;
-- [x] Read-only-Verbindungen deterministisch geschlossen.
+### Idempotenz- und Tokengrenze
 
-### API und Snapshot
-
-- [x] additive Operation `status.get_redacted` in die feste Socket-Allowlist
-  aufgenommen;
-- [x] Same-User-Unix-Socket-End-to-End-Test ergänzt;
-- [x] `status.get`, `health.get`, `report.get` und `status-v1.json` unverändert
-  gelassen;
-- [x] separaten `status-v2.json`-Snapshot implementiert;
-- [x] Modus `0600`, Runtimeverzeichnis `0700`, atomaren Replace, Datei-/Dir-fsync
-  und 64-KiB-Limit umgesetzt;
-- [x] bestehende Datei bei Validierungs- oder Größenfehler nicht ersetzt;
-- [x] v2 wird vor v1 geschrieben, sodass die v1-Kompatibilitätsgrenze zuletzt
-  atomar veröffentlicht bleibt.
+- [x] normale Provider-Mutationen dauerhaft idempotent gecacht;
+- [x] `IdempotencyStore.release()` für exakt passende, noch leere
+  Reservierungen implementiert;
+- [x] abgeschlossene Antworten gegen Release geschützt;
+- [x] Claimantworten mit Token niemals in `response_json` persistiert;
+- [x] identischer tokenhaltiger Claim-Replay ergibt `idempotency_in_progress`;
+- [x] abweichender Replay ergibt `idempotency_conflict`;
+- [x] kein zweiter Attempt bei Replay;
+- [x] Claimtoken nicht in den SQLite-Dateibytes vorhanden;
+- [x] reine Validierungsfehler geben die Reservierung für korrigierten Request
+  frei;
+- [x] erfolgreiche leere Claimantworten tokenfrei gecacht und sicher replaybar.
 
 ### TDD- und Gateevidenz
 
-- [x] ursprünglichen Draftfehler `HealthStatusV2`/`StatusV2` in Actions
-  reproduziert und behoben;
-- [x] Test-only-Head `6f5788d48c3f28170ebd776151767bf6e960aaab`
-  erwartungsgemäß rot wegen fehlender Runtime-/Snapshotmodule;
-- [x] Funktionslauf mit 192 bestandenen Tests; einzige rote Fixture anschließend
-  als fehlerhafte Sortierannahme korrigiert;
-- [x] vollständiger Integrationslauf `30567009528` grün;
-- [x] Heartbeat-Härtung zunächst rot reproduziert, anschließend Lauf
-  `30567282941` grün;
+- [x] Test-only-Head `0458352b26fa1a2b9820c6a3732c0597226d5e4c`
+  erwartungsgemäß rot wegen fehlendem `provider_api_v2`;
+- [x] erster vollständiger Providerpfad implementiert und grün gemacht;
+- [x] zusätzliche one-shot-/empty-poll-Tests zunächst rot reproduziert;
+- [x] Funktionshead `7b1ef3111bb516bb5d21bfacdd656d28b9f3a590`:
+  Syntax, vollständige Tests und Paketbuild grün, Actions-Lauf `30578039473`;
+- [x] CodeRabbit auf dem Funktionshead grün;
 - [ ] GitHub Actions, qlty und CodeRabbit auf dem finalen Dokumentationshead grün;
 - [ ] alle finalen Reviewthreads bearbeitet und gelöst;
-- [ ] PR #7 aus Draft genommen und mit erwarteter Head-SHA gemergt.
+- [ ] PR #8 aus Draft genommen und mit erwarteter Head-SHA gemergt.
 
 ## Bewusste Schnittgrenze
 
-PR-HD-07 liest oder schreibt keinen Telegram-Bot-Token und führt keine
-Netzwerkdiagnose aus. Der Credentialstatus ist bis zur produktiven
-Secret-Service-Grenze ausschließlich `configured=false`. Der produktive
-Providerwert bleibt bis zum echten Config-v2-Writer kompatibel `teebotus`.
+PR-HD-08a sendet keine Telegramnachricht. Er definiert und implementiert nur
+den sicheren Worker-/Storevertrag. TeeBotus bleibt bis zum gepaarten Adapter-PR
+auf seinem bisherigen Legacy-/Bridgepfad. Der native Telegramworker und seine
+Secret-Service-Credentials bleiben PR-HD-09.
 
-## Nächster Schnitt
+## Nächste Schritte
 
-`PR-HD-08-teebotus-provider-v2` verbindet TeeBotus mit dem gemeinsamen
-providergebundenen Claim-/Recipient-/Attempt-Vertrag:
-
-1. Capability- und Provider-Handshake;
-2. Claimtoken-/Lease-Verwendung;
-3. dynamische opaque Accountrefs;
-4. monotone Empfängerresultate und Callback-Spool;
-5. gemeinsamer Contract-Fixture-Korpus als Vorbereitung für den nativen Worker;
-6. weiterhin kein Cross-Provider-Fallback.
-
-Danach folgt `PR-HD-09-native-telegram-worker` mit Secret-Service-Credentials,
-Bot-API, Formatter, Segmentierung, Rate-Limit und Crash-Reconciliation.
+1. finale Gates und Merge von PR-HD-08a;
+2. gepaarter TeeBotus-PR `TB-HD-01-provider-v2-adapter`;
+3. TeeBotus nutzt Claimtoken, Lease, dynamische opaque Accountrefs,
+   Recipientresultate, Completion, Heartbeat und Callback-Spool;
+4. derselbe Fixture-Korpus läuft in beiden Repositorys;
+5. danach PR-HD-09 für den nativen Telegramworker.
 
 ## Pflegevorgabe
 

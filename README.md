@@ -16,6 +16,8 @@ Service key.
 - [`docs/migration-v2.md`](docs/migration-v2.md) — explicit DB-v2 migration;
 - [`docs/delivery-store-v3.md`](docs/delivery-store-v3.md) — provider-bound
   routes, targets, recipients, claims, leases and attempts;
+- [`docs/provider-api-v2.md`](docs/provider-api-v2.md) — versioned external
+  worker API, one-shot claim tokens and shared provider fixture;
 - [`docs/status-v2-health.md`](docs/status-v2-health.md) — redacted Health API;
 - [`docs/contracts/status-snapshot-v2.md`](docs/contracts/status-snapshot-v2.md)
   — owner-only additive status snapshot;
@@ -52,8 +54,7 @@ the production Secret Service.
 - additive redacted snapshot: `status-v2.json`.
 
 The read-only socket operation `status.get_redacted` returns the same v2
-envelope as the new snapshot. Existing `status.get`, `health.get`, `report.get`
-and `status-v1.json` remain unchanged during the Applet migration.
+envelope as the new snapshot. Existing v1 status operations remain unchanged.
 
 ## Codex classification fixtures
 
@@ -81,11 +82,27 @@ history_dispatcher
 ```
 
 Provider selection is immutable per Route-Plan. There is no automatic fallback.
-The provider-bound store already supports target-specific claims, leases,
-recipient results, attempts, backoff and reconciliation. A native Bot-API worker
-and its write-only Secret-Service credential operations are later slices; the
-current status API therefore exposes no token and reports the native credential
-as not configured.
+The store supports target-specific claims, leases, recipient results, attempts,
+backoff and reconciliation.
+
+The additive provider-v2 Same-User-Socket operations are:
+
+```text
+provider.v2.claim
+provider.v2.renew
+provider.v2.register_recipients
+provider.v2.record_recipients
+provider.v2.complete
+provider.v2.heartbeat
+```
+
+All require a Request-ID. Token-bearing claims are one-shot and never cached;
+token-free empty polls are safely replayable. See
+[`docs/provider-api-v2.md`](docs/provider-api-v2.md).
+
+A native Bot-API worker and write-only Secret-Service credential operations are
+later slices. The current status API therefore exposes no token and reports the
+native credential as not configured.
 
 ## Migrations
 

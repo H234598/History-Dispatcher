@@ -38,9 +38,9 @@ Credentials. Alle Events werden vor Routing verschlüsselt persistiert.
 - **`REQ-TG-010` – MUSS:** Beide Provider bestehen denselben versionierten
   Contract- und Fault-Korpus.
 
-`REQ-ROUTE-014` lautet damit: Der Router bleibt zentral im
-History-Dispatcher; Telegram wird über den gewählten Provider ausgeliefert,
-Vault bleibt ein separater Worker.
+`REQ-ROUTE-014` lautet: Der Router bleibt zentral im History-Dispatcher;
+Telegram wird über den gewählten Provider ausgeliefert, Vault bleibt ein
+separater Worker.
 
 ## 3. Einstellungen
 
@@ -66,7 +66,7 @@ Native Zusatzfelder:
 
 ## 4. Wiederverwendung aus TeeBotus
 
-Referenzstand:
+Aktueller Referenzstand:
 
 ```text
 H234598/TeeBotus@aaa8c646ced7f9a818d18d3e11cae6859a258b25
@@ -74,6 +74,8 @@ H234598/TeeBotus@aaa8c646ced7f9a818d18d3e11cae6859a258b25
 
 Referenzierte Verträge/Symbole:
 
+- `HistoryDispatcherClient` und Same-User-Socketframing;
+- `HistoryDispatcherBridge`;
 - `dispatch_codex_history_outbox`;
 - `_dispatch_codex_history_outbox_via_dispatcher`;
 - `_history_dispatcher_report_recipient_results`;
@@ -90,11 +92,11 @@ bleiben bis zu einer expliziten Root-Lizenzfestlegung vermieden.
 
 - [x] **PR-HD-03** – DB-v2-Migration;
 - [x] **PR-HD-04** – dualer Providervertrag;
-- [x] **PR-HD-05** – Route Planner, target-/provider-spezifische Claims,
-  Leases, Attempts und Aggregation;
+- [x] **PR-HD-05** – Route Planner, Claims, Leases, Attempts und Aggregation;
 - [x] **PR-HD-06** – Config-v2-Vertrags- und Previewgrenze;
-- [ ] **PR-HD-07** – redigierte Status-v2-API und Snapshot;
-- [ ] **PR-HD-08** – TeeBotus-Provider v2 gegen den gemeinsamen Storevertrag;
+- [x] **PR-HD-07** – redigierte Status-v2-API und Snapshot;
+- [ ] **PR-HD-08a** – History-Dispatcher Provider-v2-Socket/API-Vertrag;
+- [ ] **PR-HD-08b** – TeeBotus-Adapter gegen denselben Vertrag;
 - [ ] **PR-HD-09** – nativer Telegramworker mit Secret Service, Bot-API,
   Formatter, Batching, Rate-Limit und Reconciliation.
 
@@ -103,12 +105,8 @@ bleiben bis zu einer expliziten Root-Lizenzfestlegung vermieden.
 - [x] `TG-A-001..003` ADR- und Planänderung dokumentiert.
 - [x] `TG-B-001..006` Providervertrag, opaque Referenzen, Planhash,
   No-Fallback und monotone Merge-Semantik implementiert.
-- [x] `TG-C-001` Providerbindung in Route-Plan und Store integriert.
-- [x] `TG-C-002` target-/provider-spezifische Claims implementiert.
-- [x] `TG-C-003` TeeBotus-/Native-Capability-Handschlag implementiert.
-- [x] `TG-C-004` immutable Target-/Recipientbindings persistiert.
-- [x] `TG-C-005` Claimtoken, Lease, Heartbeat und Expiry-Recovery implementiert.
-- [x] `TG-C-006` Konkurrenz- und Zielisolationstests implementiert.
+- [x] `TG-C-001..006` Providerbindung, Claims, Capability, Bindings, Lease,
+  Heartbeat, Recovery und Konkurrenztests implementiert.
 - [ ] `TG-D-001` produktives Config-v2-Feld und staged Settingseditor.
 - [ ] `TG-D-002` native Credentialprofile und write-only Tokenoperationen.
 - [ ] `TG-E-001` nativer Bot-API-Client.
@@ -118,7 +116,9 @@ bleiben bis zu einer expliziten Root-Lizenzfestlegung vermieden.
 - [x] `TG-E-004` Partial Results und `possible_duplicate` im Store persistiert.
 - [ ] `TG-E-005` Transport-Callback-/Attempt-Reconciliation.
 - [ ] `TG-E-006` nativer systemd-Worker und Heartbeatloop.
-- [ ] `TG-F-001` gemeinsamer Provider-Contract-Fixture-Korpus.
+- [x] `TG-F-001a` versioniertes gemeinsames Provider-v2-Fixture im
+  History-Dispatcher angelegt.
+- [ ] `TG-F-001b` denselben Fixture-Korpus im TeeBotus-Adapter konsumieren.
 - [ ] `TG-F-002` Crash-after-Accept, Rate-Limit, Hänger, Oversize und
   Recipient-Partial-Tests beider echten Provider.
 - [ ] `TG-G-001` Appletsettings-Schalter mit Backendrevision.
@@ -127,7 +127,18 @@ bleiben bis zu einer expliziten Root-Lizenzfestlegung vermieden.
 - [ ] `TG-H-001` getrennte TeeBotus-/Native-Canaries.
 - [ ] `TG-H-002` Canarynachweis ohne Cross-Provider-Doppelversand.
 
-## 7. Definition of Done
+## 7. Provider-v2-Zwischenstand
+
+Der History-Dispatcher besitzt jetzt den getesteten Socketvertrag für Claim,
+Renew, Recipientregistrierung, Recipientresultate, Completion und Heartbeat.
+Claimantworten mit Token sind one-shot und werden nicht im Idempotenzcache
+persistiert; leere Pollantworten sind sicher replaybar.
+
+Noch offen ist der echte TeeBotus-Adapter, der seine privaten Adminrouten in
+opaque Recipientrefs übersetzt und Callback-/Spoolresultate über diesen Vertrag
+meldet.
+
+## 8. Definition of Done
 
 - [ ] Native Telegramzustellung funktioniert ohne TeeBotus.
 - [ ] TeeBotus-Zustellung funktioniert über den versionierten Providervertrag.
