@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Mapping
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -13,6 +14,18 @@ from .status_v2 import (
     HealthStatusV2,
     TelegramProviderStatus,
     WorkerHealthStatus,
+)
+
+
+_ALLOWED_WORKER_PROVIDERS = frozenset(
+    {
+        "teebotus",
+        "history_dispatcher",
+        "vault",
+        "local_archive",
+        "legacy_unknown",
+        "unknown",
+    }
 )
 
 
@@ -42,8 +55,10 @@ def _provider_from_details(target: str, raw: Any) -> str:
         details = {}
     if isinstance(details, dict):
         provider = details.get("provider_id")
-        if isinstance(provider, str) and provider.strip():
-            return provider.strip()
+        if isinstance(provider, str):
+            normalized = provider.strip().casefold()
+            if normalized in _ALLOWED_WORKER_PROVIDERS:
+                return normalized
     if target in {"vault", "local_archive"}:
         return target
     return "unknown"
@@ -61,8 +76,8 @@ def _read_workers(db: sqlite3.Connection) -> tuple[WorkerHealthStatus, ...]:
     workers: list[WorkerHealthStatus] = []
     for row in rows:
         target = str(row["target_id"] or "unknown").strip() or "unknown"
-        workers.append(
-            WorkerHealthStatus(
+        try:
+            worker = WorkerHealthStatus(
                 worker_id=str(row["worker_id"]),
                 target=target,
                 provider=_provider_from_details(target, row["details_json"]),
@@ -70,7 +85,11 @@ def _read_workers(db: sqlite3.Connection) -> tuple[WorkerHealthStatus, ...]:
                 state=str(row["state"] or "unknown"),
                 heartbeat=str(row["last_heartbeat_at"] or "") or None,
             )
-        )
+        except ValueError:
+            # One malformed operational row must not expose its contents or
+            # suppress otherwise valid health information.
+            continue
+        workers.append(worker)
     return tuple(workers)
 
 
@@ -99,7 +118,7 @@ def build_runtime_health_status(
     database = Path(database_path)
     if database.is_file():
         try:
-            with _readonly_connection(database) as db:
+            with closing(_readonly_connection(database)) as db:
                 workers = _read_workers(db)
                 deliveries = _read_delivery_counts(db)
         except sqlite3.Error:
