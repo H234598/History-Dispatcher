@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import os
 import secrets
+import sqlite3
 import threading
 import time
+import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +20,11 @@ from .config import (
     _opaque_profile,
     _recipient_profiles,
     config_revision,
+    load_config,
+    write_config,
 )
 from .crypto import SecretServiceKeyProvider
+from .identifiers import persistent_opaque_id
 from .telegram_provider import TelegramDispatchProvider
 
 
@@ -273,11 +281,164 @@ class ConfigManagerV2:
                 expires_in_seconds=CONFIG_PREVIEW_TTL_SECONDS,
             )
 
+    def apply_preview(
+        self,
+        *,
+        expected_revision: str,
+        preview_token: str,
+        fingerprint: str,
+        confirmation: str,
+        actor: str,
+    ) -> dict[str, object]:
+        normalized_revision = str(expected_revision or "").strip().lower()
+        normalized_fingerprint = str(fingerprint or "").strip().lower()
+        normalized_actor = self._validate_actor(actor)
+        if not isinstance(preview_token, str) or not preview_token:
+            raise ConfigV2ApplyError("preview token is invalid")
+        token_hash = self._token_hash(preview_token)
+        with self._lock:
+            entry = self._previews.pop(token_hash, None)
+            if entry is None:
+                raise ConfigV2ApplyError("preview token is unknown or consumed")
+            if entry.expires_at <= self._clock():
+                raise ConfigV2ApplyError("preview token expired")
+            self._require_audit_schema()
+            if normalized_revision != entry.expected_revision:
+                self._audit_rejection(
+                    actor=normalized_actor,
+                    revision_before=entry.expected_revision,
+                    preview_token_hash=token_hash,
+                    reason_code="revision_mismatch",
+                )
+                raise ConfigV2ApplyError("config revision mismatch")
+            if not hmac.compare_digest(
+                normalized_fingerprint,
+                entry.fingerprint,
+            ):
+                self._audit_rejection(
+                    actor=normalized_actor,
+                    revision_before=entry.expected_revision,
+                    preview_token_hash=token_hash,
+                    reason_code="fingerprint_mismatch",
+                )
+                raise ConfigV2ApplyError("preview fingerprint mismatch")
+            expected_confirmation = f"APPLY {entry.fingerprint[:12]}"
+            if not hmac.compare_digest(
+                str(confirmation or ""),
+                expected_confirmation,
+            ):
+                self._audit_rejection(
+                    actor=normalized_actor,
+                    revision_before=entry.expected_revision,
+                    preview_token_hash=token_hash,
+                    reason_code="confirmation_mismatch",
+                )
+                raise ConfigV2ApplyError("preview confirmation mismatch")
+
+            current = load_config(self._config.config_path)
+            current_revision = config_revision(current)
+            if current_revision != entry.expected_revision:
+                self._audit_rejection(
+                    actor=normalized_actor,
+                    revision_before=entry.expected_revision,
+                    revision_after=current_revision,
+                    preview_token_hash=token_hash,
+                    reason_code="revision_changed",
+                )
+                raise ConfigV2ApplyError(
+                    "config revision changed after preview"
+                )
+
+            desired = entry.patch.telegram
+            candidate = replace(
+                current,
+                telegram_provider=desired.provider,
+                telegram_credential_ref=desired.credential_ref,
+                telegram_recipient_refs=desired.recipient_refs,
+            )
+            affected_count = len(self._changes_against(current, entry.patch))
+            before_bytes = (
+                current.config_path.read_bytes()
+                if current.config_path.exists()
+                else None
+            )
+            try:
+                write_config(candidate)
+                reloaded = load_config(candidate.config_path)
+                candidate_revision = config_revision(candidate)
+                reloaded_revision = config_revision(reloaded)
+                if reloaded_revision != candidate_revision:
+                    raise ConfigV2ApplyError(
+                        "post-write config verification failed"
+                    )
+            except Exception as exc:
+                self._restore_config_bytes(current.config_path, before_bytes)
+                self._config = load_config(current.config_path)
+                self._audit_rejection(
+                    actor=normalized_actor,
+                    revision_before=current_revision,
+                    preview_token_hash=token_hash,
+                    reason_code="write_failed_rolled_back",
+                )
+                if isinstance(exc, ConfigV2ApplyError):
+                    raise
+                raise ConfigV2ApplyError(
+                    "config write failed and was rolled back"
+                ) from exc
+
+            try:
+                self._audit_apply(
+                    actor_key=self._actor_key(normalized_actor),
+                    revision_before=current_revision,
+                    revision_after=reloaded_revision,
+                    preview_token_hash=token_hash,
+                    result="applied",
+                    affected_count=affected_count,
+                    reason_code="applied",
+                )
+            except Exception as exc:
+                self._restore_config_bytes(current.config_path, before_bytes)
+                self._config = load_config(current.config_path)
+                self._audit_rejection(
+                    actor=normalized_actor,
+                    revision_before=current_revision,
+                    revision_after=reloaded_revision,
+                    preview_token_hash=token_hash,
+                    reason_code="audit_failed_rolled_back",
+                )
+                raise ConfigV2ApplyError(
+                    "config apply audit failed and was rolled back"
+                ) from exc
+
+            self._config = reloaded
+            return {
+                "ok": True,
+                "schema_version": CONFIG_V2_SCHEMA_VERSION,
+                "config_revision": reloaded_revision,
+                "restart_required": False,
+                "effect": "new_route_plans_only",
+                "routing": {
+                    "telegram": {
+                        "provider": reloaded.telegram_provider.value,
+                        "credential_ref": reloaded.telegram_credential_ref,
+                        "recipient_refs": list(
+                            reloaded.telegram_recipient_refs
+                        ),
+                    }
+                },
+            }
+
     def _changes(
         self,
         patch: ConfigPatchV2,
     ) -> dict[str, dict[str, object]]:
-        current = self._config
+        return self._changes_against(self._config, patch)
+
+    @staticmethod
+    def _changes_against(
+        current: DispatcherConfig,
+        patch: ConfigPatchV2,
+    ) -> dict[str, dict[str, object]]:
         desired = patch.telegram
         fields: tuple[tuple[str, object, object], ...] = (
             (
@@ -337,3 +498,130 @@ class ConfigManagerV2:
         ]
         for key in expired:
             self._previews.pop(key, None)
+
+    @staticmethod
+    def _validate_actor(actor: object) -> str:
+        if not isinstance(actor, str):
+            raise ConfigV2ApplyError("config actor must be a string")
+        normalized = actor.strip()
+        if (
+            not normalized
+            or len(normalized) > 160
+            or any(
+                ord(character) < 0x20 or ord(character) == 0x7F
+                for character in normalized
+            )
+        ):
+            raise ConfigV2ApplyError("config actor is invalid")
+        return normalized
+
+    def _actor_key(self, actor: str) -> str:
+        return persistent_opaque_id(
+            self.key_provider,
+            "config-actor",
+            actor,
+            prefix="actor",
+        )
+
+    def _require_audit_schema(self) -> None:
+        try:
+            with sqlite3.connect(self.database_path) as db:
+                row = db.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type='table' AND name='config_audit'"
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise ConfigV2ApplyError(
+                "config_audit schema is unavailable"
+            ) from exc
+        if row is None:
+            raise ConfigV2ApplyError(
+                "config_audit table is unavailable"
+            )
+
+    def _audit_rejection(
+        self,
+        *,
+        actor: str,
+        revision_before: str,
+        preview_token_hash: str,
+        reason_code: str,
+        revision_after: str = "",
+    ) -> None:
+        try:
+            self._audit_apply(
+                actor_key=self._actor_key(actor),
+                revision_before=revision_before,
+                revision_after=revision_after,
+                preview_token_hash=preview_token_hash,
+                result="rejected",
+                affected_count=0,
+                reason_code=reason_code,
+            )
+        except Exception:
+            # A rejection remains fail-closed even when its best-effort audit
+            # cannot be recorded. Successful writes never use this path.
+            pass
+
+    def _audit_apply(
+        self,
+        *,
+        actor_key: str,
+        revision_before: str,
+        revision_after: str,
+        preview_token_hash: str,
+        result: str,
+        affected_count: int,
+        reason_code: str,
+    ) -> None:
+        created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        audit_id = persistent_opaque_id(
+            self.key_provider,
+            "config-audit",
+            f"{created_at}|{uuid.uuid4().hex}",
+            prefix="audit",
+        )
+        with sqlite3.connect(self.database_path, timeout=30) as db:
+            db.execute("PRAGMA foreign_keys=ON")
+            db.execute(
+                "INSERT INTO config_audit("
+                "id,actor_key,operation,revision_before,revision_after,"
+                "preview_token_hash,result,affected_count,reason_code,created_at"
+                ") VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    audit_id,
+                    actor_key,
+                    "config.apply_v2",
+                    revision_before,
+                    revision_after,
+                    preview_token_hash,
+                    result,
+                    max(0, int(affected_count)),
+                    reason_code,
+                    created_at,
+                ),
+            )
+
+    @staticmethod
+    def _restore_config_bytes(path: Path, before_bytes: bytes | None) -> None:
+        if before_bytes is None:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            return
+        temporary = path.with_name(
+            f".{path.name}.{os.getpid()}.rollback.tmp"
+        )
+        try:
+            with temporary.open("wb") as handle:
+                handle.write(before_bytes)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, path)
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
