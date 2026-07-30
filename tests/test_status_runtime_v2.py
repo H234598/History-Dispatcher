@@ -119,7 +119,11 @@ def test_runtime_status_caps_worker_rows_and_fails_closed_on_bad_details(
                     "telegram",
                     "history-dispatcher-telegram-native-v1",
                     "idle",
-                    f"2026-07-30T17:{index % 60:02d}:00Z",
+                    (
+                        "2026-07-30T19:59:00Z"
+                        if index == 0
+                        else f"2026-07-30T17:{index % 60:02d}:00Z"
+                    ),
                     "{broken-json" if index == 0 else '{"provider_id":"history_dispatcher"}',
                 )
                 for index in range(70)
