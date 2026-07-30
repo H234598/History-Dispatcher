@@ -2,116 +2,120 @@
 
 Standalone, local-only encrypted history collection and dispatch service.
 
-The control interface is a versioned Unix socket. The service does not expose an
-IP listener and stores payloads encrypted with a dedicated Secret Service key.
+The control interface is a versioned same-user Unix socket. The service exposes
+no IP listener and stores History payloads encrypted with a dedicated Secret
+Service key.
 
 ## Architecture and implementation tracking
 
-The current v1 security boundary and the accepted direction for the Cinnamon
-applet expansion are documented in:
-
-- [`docs/architecture.md`](docs/architecture.md) — components, data flow and
-  failure domains;
-- [`docs/contracts/`](docs/contracts/) — frozen control, status and security
-  contracts;
-- [`docs/adr/`](docs/adr/) — ADR-001 through ADR-016;
-- [`docs/history-classification.md`](docs/history-classification.md) — the pure,
-  versioned Codex rollout classifier, redaction and fixture contract;
-- [`docs/migration-v2.md`](docs/migration-v2.md) — the explicit, additive,
-  backup- and restore-tested database-v2 migration contract;
-- [`docs/implementation-progress.md`](docs/implementation-progress.md) — the
+- [`docs/architecture.md`](docs/architecture.md) — components and failure domains;
+- [`docs/contracts/`](docs/contracts/) — control, status and security contracts;
+- [`docs/adr/`](docs/adr/) — accepted architecture decisions;
+- [`docs/history-classification.md`](docs/history-classification.md) — Codex
+  classifier, redaction and fixture contract;
+- [`docs/migration-v2.md`](docs/migration-v2.md) — explicit DB-v2 migration;
+- [`docs/delivery-store-v3.md`](docs/delivery-store-v3.md) — provider-bound
+  routes, targets, recipients, claims, leases and attempts;
+- [`docs/status-v2-health.md`](docs/status-v2-health.md) — redacted Health API;
+- [`docs/contracts/status-snapshot-v2.md`](docs/contracts/status-snapshot-v2.md)
+  — owner-only additive status snapshot;
+- [`docs/implementation-plan-addendum-telegram.md`](docs/implementation-plan-addendum-telegram.md)
+  — standalone Telegram plan extension;
+- [`docs/implementation-progress.md`](docs/implementation-progress.md) — current
   sequential implementation status;
-- [`docs/reuse-ledger.md`](docs/reuse-ledger.md) — source, licence and parity
-  tracking for future adaptations.
+- [`docs/reuse-ledger.md`](docs/reuse-ledger.md) — source and parity tracking.
 
 ## Development
 
-    python3 -m venv .venv-py313
-    .venv-py313/bin/python -m pip install -e '.[dev]'
-    .venv-py313/bin/python -m history_dispatcher config check
-    .venv-py313/bin/python -m history_dispatcher status --json
+```bash
+python3 -m venv .venv-py313
+.venv-py313/bin/python -m pip install -e '.[dev]'
+.venv-py313/bin/python -m history_dispatcher config check
+.venv-py313/bin/python -m history_dispatcher status --json
+```
 
-The production key is resolved with:
+The production payload key is resolved with:
 
-    secret-tool lookup application history-dispatcher purpose payload-key
+```bash
+secret-tool lookup application history-dispatcher purpose payload-key
+```
 
-The value must decode to exactly 32 bytes. Tests inject a static key and never
-touch the production Secret Service.
-
-### Codex classification fixtures
-
-Never commit a raw Codex rollout. A local example must first pass through the
-deterministic, streaming sanitizer:
-
-    python scripts/sanitize_codex_fixture.py \
-      /private/path/rollout.jsonl \
-      /tmp/sanitized-rollout.jsonl \
-      --manifest /tmp/sanitized-manifest.json \
-      --upstream-commit 8e271dc02b23d42827875019924be0f5005642b0 \
-      --dry-run
-
-Inspect the dry-run metadata, then repeat without `--dry-run`. The checked-in
-fixture corpus and its hash manifest live below `tests/fixtures/codex/`.
-The classifier introduced with that corpus is currently a pure API and is not
-yet wired into the production collector or database schema.
+It must decode to exactly 32 bytes. Tests inject a static key and never touch
+the production Secret Service.
 
 ## Runtime layout
 
-The default configuration is `~/.config/history-dispatcher/config.toml`.
-State is kept below `~/.local/state/history-dispatcher`; the owner-only control
-socket and the bounded `status-v1.json` snapshot are below
-`$XDG_RUNTIME_DIR/history-dispatcher`. The Codex collector scans only
-`~/.codex/sessions` and `~/.codex-agents/*/sessions` by default.
-`config.example.toml` contains a complete, strict configuration template for
-the service and Cinnamon applet; replace its `USERNAME` and runtime UID
-placeholders before installing it.
+- config: `~/.config/history-dispatcher/config.toml`;
+- state: `~/.local/state/history-dispatcher`;
+- control socket: `$XDG_RUNTIME_DIR/history-dispatcher/control.sock`;
+- compatibility snapshot: `status-v1.json`;
+- additive redacted snapshot: `status-v2.json`.
 
-Render hardened user units with:
+The read-only socket operation `status.get_redacted` returns the same v2
+envelope as the new snapshot. Existing `status.get`, `health.get`, `report.get`
+and `status-v1.json` remain unchanged during the Applet migration.
 
-    python -m history_dispatcher.systemd --print
+## Codex classification fixtures
 
-The service is deliberately fail-closed when the Secret Service key is absent
-or malformed. `status` can still report queue health without decrypting a
-payload; all payload operations require the real key.
+Never commit a raw Codex rollout. Sanitize local examples first:
 
-## TeeBotus integration
+```bash
+python scripts/sanitize_codex_fixture.py \
+  /private/path/rollout.jsonl \
+  /tmp/sanitized-rollout.jsonl \
+  --manifest /tmp/sanitized-manifest.json \
+  --upstream-commit 8e271dc02b23d42827875019924be0f5005642b0 \
+  --dry-run
+```
 
-TeeBotus keeps its Messenger adapters and can use the optional bridge by
-setting `TEEBOTUS_HISTORY_DISPATCHER_MODE=bridge` and, when needed,
-`HISTORY_DISPATCHER_SOCKET`. `shadow` mirrors newly created legacy summaries
-without changing the legacy reader. Delivery callbacks that cannot reach the
-Dispatcher are atomically spooled under TeeBotus state and retried later.
+The classifier remains isolated from the production collector until the later
+cursor/cutover slice.
 
-Install the standalone applet transactionally with:
+## Telegram providers
 
-    python scripts/install_cinnamon_applet.py --dry-run
+The route contract supports exactly:
 
-The applet reads only the bounded snapshot and runs allowlisted actions through
-the fixed `applet-action` CLI path. Destructive deletion requires a backend
-preview token and the exact `LOESCHEN <Anzahl>` confirmation.
+```text
+teebotus
+history_dispatcher
+```
 
-## Migration
+Provider selection is immutable per Route-Plan. There is no automatic fallback.
+The provider-bound store already supports target-specific claims, leases,
+recipient results, attempts, backoff and reconciliation. A native Bot-API worker
+and its write-only Secret-Service credential operations are later slices; the
+current status API therefore exposes no token and reports the native credential
+as not configured.
 
-For a legacy JSONL export, use `history-dispatcher migrate-legacy --dry-run`
-first. TeeBotus also exposes `migrate_codex_history_to_dispatcher`, which
-streams decrypted AccountStore records directly over the Unix socket and never
-creates a plaintext staging file.
+## Migrations
 
-The additive database-v2 migration is deliberately separate from normal
-startup and defaults to a write-free dry run:
+Database v2 defaults to a write-free dry run:
 
-    python scripts/migrate_database_v2.py preflight
-    python scripts/migrate_database_v2.py migrate
+```bash
+python scripts/migrate_database_v2.py preflight
+python scripts/migrate_database_v2.py migrate
+```
 
-A real write additionally requires `--apply --confirm MIGRATE-V2`. It creates
-and verifies an owner-only SQLite backup before the single migration
-transaction. The migration does not activate the new classifier, router or any
-new external delivery. See [`docs/migration-v2.md`](docs/migration-v2.md) for
-preflight, verification and hash-bound restore steps.
+A real write requires `--apply --confirm MIGRATE-V2`.
 
-## Isolated Cinnamon verification
+Provider-bound delivery schema v3 also defaults to dry run:
 
-`scripts/run_isolated_cinnamon_applet.py` runs one or both applets inside an
-unshared Bubblewrap environment and a rootless Xephyr display. It uses a
-throw-away HOME, runtime directory, D-Bus, and dconf database; it must not be
-run against the production Cinnamon display.
+```bash
+python scripts/migrate_delivery_v3.py preflight
+python scripts/migrate_delivery_v3.py migrate
+python scripts/migrate_delivery_v3.py verify
+```
+
+A real write requires `--apply --confirm MIGRATE-V3`. Neither migration starts a
+network worker or reactivates Legacy deliveries.
+
+## Cinnamon applet
+
+Install the current applet transactionally with:
+
+```bash
+python scripts/install_cinnamon_applet.py --dry-run
+```
+
+The Applet remains a bounded snapshot/socket client. It does not read
+credentials, open Telegram connections or participate in delivery claims.

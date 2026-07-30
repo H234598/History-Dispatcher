@@ -1,119 +1,105 @@
 # Implementierungsfortschritt: Cinnamon-Applet-Ausbau
 
-**Verbindliche Planquelle:** `HISTORY_DISPATCHER_CINNAMON_APPLET_IMPLEMENTIERUNGSPLAN`, Stand 28. Juli 2026, SHA-256 `a1f52c11117a063702f4cff008c9d24646f8f33a7540cdd1bf48ab220053ba0c`  
-**Verbindliches Zusatzartefakt:** `docs/implementation-plan-addendum-telegram.md`  
-**Verifizierte ursprüngliche Ausgangsbasis:** `main@8f0bb05a540942e61c979a51bbaeca32d4308eb1`  
-**Aktueller Main-Stand zu Beginn dieses Schnitts:** `ec3acf360cabc793835ecf3a8106fd1501897ba4`  
-**Aktueller Umsetzungsschnitt:** `PR-HD-04-telegram-provider-contract`  
-**Arbeitsbranch:** `codex/telegram-provider-contract`
+**Planquelle:** `HISTORY_DISPATCHER_CINNAMON_APPLET_IMPLEMENTIERUNGSPLAN`, SHA-256 `a1f52c11117a063702f4cff008c9d24646f8f33a7540cdd1bf48ab220053ba0c`  
+**Telegram-Addendum:** `docs/implementation-plan-addendum-telegram.md`  
+**Ausgangsbasis:** `main@8f0bb05a540942e61c979a51bbaeca32d4308eb1`  
+**Aktuelle PR-Basis:** `main@74cec04ef6f06edf3ea3e5826f9fd4f3e5a1afc3`  
+**Aktueller Schnitt:** `PR-HD-07-status-v2-health`  
+**Branch:** `codex/status-v2-health`
 
-## Abgeschlossener Schnitt `PR-HD-01-baseline-adrs`
+## Gemergte Schnitte
 
-- [x] Baseline, ADR-001 bis ADR-016, Sicherheitsverträge und Reuse Ledger angelegt (`WP-001`).
-- [x] verhaltensbasierte Invariantentests für Socket, Peer-Credentials, Crypto, Snapshot, systemd und Applet ergänzt.
-- [x] sieben CodeRabbit-Befunde umgesetzt und sämtliche Threads gelöst.
-- [x] GitHub Actions, qlty und CodeRabbit auf Head `3366bf63f208a7d6019b228dc67399b154d762c8` grün.
-- [x] PR #1 per Squash gemergt; Main-Commit `4ff947aba6da390dcff7adaea41e9e4871132eef`.
+| Schnitt | Inhalt | Main-Commit |
+|---|---|---|
+| PR-HD-01 | Baseline, ADRs, Sicherheitsverträge | `4ff947aba6da390dcff7adaea41e9e4871132eef` |
+| PR-HD-02 | Codex-Fixtures, Sanitizer, Classifier | `d6b9fccdce5d429d07e182b1fff985c0fd1c8c40` |
+| PR-HD-03 | transaktionale DB-v2-Migration | `ec3acf360cabc793835ecf3a8106fd1501897ba4` |
+| PR-HD-04 | dualer Telegram-Providervertrag | `9d3f9420805986720e458d18876539962eab893f` |
+| PR-HD-06 | Config-v2-Vertrags- und Previewgrenze | `278f9a3198a54cde7495b1a3ce4fb0c85dabc246` |
+| PR-HD-05 | providergebundener Route-/Delivery-Store | `74cec04ef6f06edf3ea3e5826f9fd4f3e5a1afc3` |
 
-## Abgeschlossener Schnitt `PR-HD-02-codex-fixtures-classifier`
+PR-HD-05 wurde nach Prüfung seines bereits vollständig grünen Heads nachträglich
+vor PR-HD-07 geschlossen. Damit basiert der Statusschnitt nun auf der im Plan
+vorgesehenen vollständigen Delivery-/Heartbeat-Persistenzgrenze.
 
-- [x] sanitisiertes aktuelles/Legacy/Sub-Agent/Malformed-Fixture-Korpus und Manifest angelegt (`WP-010`).
-- [x] veröffentlichungssicheren Fixture-Sanitizer mit Strict-JSON, bounded Line Reads, schreibfreiem Dry Run und atomarem Output implementiert.
-- [x] `subagent_completion`, `intermediate_update`, `task_completion` und `unknown` samt Confidence, Reason-Code und Deduplizierung implementiert (`WP-011`).
-- [x] Reasoning, Tool-, User-, System-, Developer- und nicht sichtbare Inhalte ausgeschlossen.
-- [x] sämtliche CodeRabbit-Befunde bearbeitet; GitHub Actions, qlty und CodeRabbit auf finalem Head `f3edb3cea06ac06332f40fced67b94e656151830` grün.
-- [x] PR #2 per Squash gemergt; Main-Commit `d6b9fccdce5d429d07e182b1fff985c0fd1c8c40`.
+## Status PR-HD-07
 
-## Abgeschlossener Schnitt `PR-HD-03-db-v2-migration`
+### Typ- und Leakvertrag
 
-### Schema, Migration und Sicherheitsgrenzen
+- [x] einheitliche Typen `HealthStatusV2`, `TelegramProviderStatus`,
+  `CredentialStatus` und `WorkerHealthStatus` implementiert;
+- [x] vorläufige Aliasnamen des ersten Drafts kompatibel gehalten;
+- [x] Provider auf `teebotus | history_dispatcher` begrenzt;
+- [x] Worker-, Zähler- und Zeitfelder begrenzt und validiert;
+- [x] rekursive Leakprüfung für Secret-, Token-, Chat-/Recipient-/Message- und
+  Payloadfelder implementiert;
+- [x] sensible Stringmuster, nicht endliches JSON, mehr als zwölf Ebenen, mehr
+  als 4096 Werte und mehr als 64 KiB fail-closed behandelt.
 
-- [x] additive Tabellen `history_events`, `route_plans`, `target_deliveries`, `recipient_deliveries`, `delivery_attempts`, `local_archive_entries`, `worker_heartbeats`, `config_audit` und `migration_journal` definiert.
-- [x] HMAC-SHA-256-basierte, namespace-getrennte persistente IDs über einen separaten Secret-Service-Subkey implementiert.
-- [x] monotone Target-/Recipient-State-Machines in Python und SQLite implementiert.
-- [x] owner-, symlink-, key-, disk-, integrity- und claimgeprüften Preflight implementiert.
-- [x] schreibfreien Dry Run, verifiziertes owner-only Backup, eine `BEGIN IMMEDIATE`-Migrationstransaktion und hashgebundenen Restore implementiert.
-- [x] Legacybestand konservativ auf explizite Klassifikation oder `unknown/ambiguous` gemappt und vollständig auf `legacy_hold` gesetzt.
-- [x] keine neue `pending`, `claimed` oder `failed_retryable` Legacy-Delivery erzeugt.
-- [x] bestehende `accepted`/`delivered`/`acknowledged` Empfängerzustände erhalten; `possible_duplicate` auf Reconciliation-Hold gesetzt.
-- [x] v1-Retention kann Altzeilen entfernen, ohne die verschlüsselte v2-Kopie zu löschen.
+### Runtime-Health
 
-### Reviewhärtung und Mergeevidenz
+- [x] Queuezähler aus dem bestehenden v1-Store eingebunden;
+- [x] Deliveryzustände read-only und gruppiert aus `target_deliveries` gelesen;
+- [x] höchstens 64 Workerheartbeats read-only ausgegeben;
+- [x] Vor-Migrationsdatenbanken ohne v2/v3-Tabellen sicher unterstützt;
+- [x] malformed Details auf `unknown` reduziert;
+- [x] unbekannte Providerwerte neutralisiert;
+- [x] strukturell ungültige Workerzeilen ausgelassen;
+- [x] Read-only-Verbindungen deterministisch geschlossen.
 
-- [x] SQLite-Verbindungen über Context Manager deterministisch geschlossen.
-- [x] aktive v1-Claims nach `BEGIN IMMEDIATE` erneut autoritativ geprüft.
-- [x] unvollständige v1-Schemata vor Backup und Row-Copy klar abgewiesen.
-- [x] Backup-/Restoreverzeichnisse vor und nach Erstellung symlink-/owner-/typegeprüft.
-- [x] Restore validiert und kopiert denselben geöffneten Backup-Inode in eine private Stagingdatei und verhindert TOCTOU-Austausch.
-- [x] zusätzliche Tests für Connection-Cleanup, Claim-TOCTOU, Partialschema, Verzeichnisfehler und Restore-Inode-Austausch ergänzt.
-- [x] GitHub Actions auf finalem Head `94d0e887cb09a4f4160127dd69722eafe713d8fa` grün, Lauf `30362866142`.
-- [x] qlty und CodeRabbit auf dem finalen Head grün; sämtliche Reviewthreads gelöst.
-- [x] PR #3 per Squash mit erwarteter Head-SHA gemergt.
-- [x] Main-Commit `ec3acf360cabc793835ecf3a8106fd1501897ba4`.
+### API und Snapshot
 
-## Status `PR-HD-04-telegram-provider-contract`
+- [x] additive Operation `status.get_redacted` in die feste Socket-Allowlist
+  aufgenommen;
+- [x] Same-User-Unix-Socket-End-to-End-Test ergänzt;
+- [x] `status.get`, `health.get`, `report.get` und `status-v1.json` unverändert
+  gelassen;
+- [x] separaten `status-v2.json`-Snapshot implementiert;
+- [x] Modus `0600`, Runtimeverzeichnis `0700`, atomaren Replace, Datei-/Dir-fsync
+  und 64-KiB-Limit umgesetzt;
+- [x] bestehende Datei bei Validierungs- oder Größenfehler nicht ersetzt;
+- [x] v2 wird vor v1 geschrieben, sodass die v1-Kompatibilitätsgrenze zuletzt
+  atomar veröffentlicht bleibt.
 
-### Planpflege und Architektur
+### TDD- und Gateevidenz
 
-- [x] Zusatzanforderung „Dispatch über TeeBotus oder direkt über History-Dispatcher“ als verbindliches Planaddendum aufgenommen.
-- [x] `REQ-TG-001` bis `REQ-TG-010`, neue PR-Reihenfolge, Zusatz-Checkboxen und Definition of Done dokumentiert.
-- [x] ADR-007 in ihrer exklusiven Form als ersetzt markiert.
-- [x] ADR-017 mit zwei Providern und strikt verbotenem automatischem Cross-Provider-Fallback angelegt.
-- [x] TeeBotus-Quellcommit und adaptierte Symbole im Reuse Ledger verankert.
-- [x] Settingsfeld `routing.telegram.provider` sowie die spätere Combobox „Über TeeBotus / Direkt über History-Dispatcher“ exakt spezifiziert.
-
-### Provider- und Recipientvertrag
-
-- [x] stabile Enum `teebotus | history_dispatcher` implementiert.
-- [x] immutable `TelegramTransportBinding` mit Provider-Schema implementiert.
-- [x] TeeBotus-Capability beziehungsweise native opaque Credential-/Recipientreferenzen streng getrennt.
-- [x] rohe Tokens, numerische Chat-IDs, Pfade, Kontrollzeichen und übergroße Recipientlisten fail-closed abgewiesen.
-- [x] Provider in kanonisches Route-Plan-Fragment und Planhash gebunden.
-- [x] Worker-/Plan-Provider-Missmatch ohne Fallback abgewiesen.
-- [x] redigierte Statussicht ohne Credential-/Recipientreferenzen implementiert.
-- [x] TeeBotus-Erfolgsrang und Recipient-Reconciliation transportneutral adaptiert.
-- [x] erfolgreiche Empfänger gegen Downgrade durch spätere Fehler geschützt.
-- [x] `possible_duplicate` bis zu einer belastbaren Erfolgsquittung erhalten.
-- [x] negative und monotone Providertests ergänzt.
-
-### Noch offen vor Merge
-
-- [x] PR #4 zunächst sauber auf PR #3 gestapelt und separat getestet.
-- [x] gestapelter Head `7758ed0181dc2b6f8d1bcc08b06df7444f7e9ef1`: GitHub Actions, qlty und CodeRabbit grün; keine Reviewthreads.
-- [x] nach Merge von PR #3 den Providercommit auf `main@ec3acf360cabc793835ecf3a8106fd1501897ba4` neu aufgebaut.
-- [x] PR #4 auf `main` retargetet.
-- [ ] GitHub Actions, qlty und CodeRabbit auf dem neuen finalen Head grün.
-- [ ] PR #4 aus dem Draft nehmen.
-- [ ] mögliche neue Reviewthreads bearbeiten und lösen.
-- [ ] PR #4 per Squash mit erwarteter Head-SHA mergen.
+- [x] ursprünglichen Draftfehler `HealthStatusV2`/`StatusV2` in Actions
+  reproduziert und behoben;
+- [x] Test-only-Head `6f5788d48c3f28170ebd776151767bf6e960aaab`
+  erwartungsgemäß rot wegen fehlender Runtime-/Snapshotmodule;
+- [x] Funktionslauf mit 192 bestandenen Tests; einzige rote Fixture anschließend
+  als fehlerhafte Sortierannahme korrigiert;
+- [x] vollständiger Integrationslauf `30567009528` grün;
+- [x] Heartbeat-Härtung zunächst rot reproduziert, anschließend Lauf
+  `30567282941` grün;
+- [ ] GitHub Actions, qlty und CodeRabbit auf dem finalen Dokumentationshead grün;
+- [ ] alle finalen Reviewthreads bearbeitet und gelöst;
+- [ ] PR #7 aus Draft genommen und mit erwarteter Head-SHA gemergt.
 
 ## Bewusste Schnittgrenze
 
-Dieser Schnitt versendet noch keine Telegramnachricht und speichert noch keinen
-Bot-Token. Der Cinnamon-Schalter wird nicht als tote UI vorgezogen, sondern erst
-mit Config v2 und dem revisionsgesicherten Backend-Routingeditor aktiviert.
+PR-HD-07 liest oder schreibt keinen Telegram-Bot-Token und führt keine
+Netzwerkdiagnose aus. Der Credentialstatus ist bis zur produktiven
+Secret-Service-Grenze ausschließlich `configured=false`. Der produktive
+Providerwert bleibt bis zum echten Config-v2-Writer kompatibel `teebotus`.
 
-Providerentscheidungen sind bereits unveränderlich und planhashgebunden. Der
-spätere native Worker kann daher nicht still als Fallback für einen TeeBotus-
-Plan einspringen und umgekehrt.
+## Nächster Schnitt
 
-## Nächster Schnitt nach grünem Merge
+`PR-HD-08-teebotus-provider-v2` verbindet TeeBotus mit dem gemeinsamen
+providergebundenen Claim-/Recipient-/Attempt-Vertrag:
 
-`PR-HD-05-route-planner-deliveries` vervollständigt den v2-Storevertrag:
+1. Capability- und Provider-Handshake;
+2. Claimtoken-/Lease-Verwendung;
+3. dynamische opaque Accountrefs;
+4. monotone Empfängerresultate und Callback-Spool;
+5. gemeinsamer Contract-Fixture-Korpus als Vorbereitung für den nativen Worker;
+6. weiterhin kein Cross-Provider-Fallback.
 
-1. target- und provider-spezifische Claims;
-2. Lease, Heartbeat, Claimtoken und Workerownership;
-3. recipient-spezifische Completion und Attempts;
-4. Aggregation von pending/partial/delivered/failed/skipped;
-5. Expiry-Recovery und konkurrierende Worker-Tests;
-6. Provider-Capability-Handschlag für TeeBotus und den nativen Worker;
-7. weiterhin noch ohne produktiven Bot-API-Versand.
-
-Danach folgen Config v2/Settings und der eigene History-Dispatcher-Telegramworker
-mit Secret-Service-Credentials, Formatter, Rate-Limit und Reconciliation.
+Danach folgt `PR-HD-09-native-telegram-worker` mit Secret-Service-Credentials,
+Bot-API, Formatter, Segmentierung, Rate-Limit und Crash-Reconciliation.
 
 ## Pflegevorgabe
 
-Ein Haken wird nur gesetzt, wenn Code beziehungsweise Dokumentation vorhanden,
-die zugehörigen Tests grün und der GitHub-Nachweis im Pull Request verlinkt
-sind. Mergeabhängige Punkte bleiben bis zum tatsächlichen Merge offen.
+Ein Haken wird nur gesetzt, wenn Code oder Dokumentation vorhanden, die
+zugehörigen Tests grün und der GitHub-Nachweis im Pull Request nachvollziehbar
+ist. Mergeabhängige Punkte bleiben bis zum tatsächlichen Merge offen.
