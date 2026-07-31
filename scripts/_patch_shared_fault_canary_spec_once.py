@@ -70,3 +70,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# Trigger the already-installed one-shot workflow after the workflow file exists.
