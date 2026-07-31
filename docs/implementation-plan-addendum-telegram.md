@@ -51,15 +51,22 @@ persistiert.
 Telegram wird über den gewählten Provider ausgeliefert, Vault bleibt ein
 separater Worker.
 
-## 3. Einstellungen
+## 3. Produktive Einstellungen
+
+Das Backend persistiert jetzt:
 
 ```toml
 [routing.telegram]
 provider = "teebotus"
+credential_ref = ""
+recipient_refs = []
 ```
 
 Default ist kompatibel `teebotus`; alle externen History-Typ-Schalter bleiben
 standardmäßig `false`.
+
+`credential_ref` und `recipient_refs` sind opaque Profilnamen. Bot-Tokens und
+rohe Chat-IDs werden von Configloader und Patch-API abgewiesen.
 
 | Feld-ID | Widget | Default | Source of Truth | Apply |
 |---|---|---|---|---|
@@ -70,11 +77,24 @@ Native Zusatzfelder:
 - opaque Credentialprofil;
 - opaque Recipientprofile;
 - Credentialstatus;
-- write-only Token setzen/ersetzen;
+- write-only Token setzen/ersetzen/löschen;
 - bestätigter Verbindungstest.
 
-Der Schalter wird erst aktiviert, wenn produktiver Config-v2-Writer,
-Revision/Audit und native Credentialgrenze existieren.
+Die produktive Backendschnittstelle ist implementiert:
+
+```text
+config.get_redacted
+config.validate_patch
+config.preview_apply
+config.apply
+```
+
+Ein Apply benötigt Revision, 60-Sekunden-One-use-Previewtoken, kanonischen
+Fingerprint, exakte Bestätigung und Request-ID. Die Wirkung ist ausschließlich
+`new_route_plans_only`.
+
+Der sichtbare Cinnamon-Schalter bleibt bis zur vollständigen nativen
+Credentialgrenze deaktiviert. dconf wird nicht zur Routingquelle.
 
 ## 4. Gemergte Cross-Repository-Referenzen
 
@@ -127,8 +147,11 @@ bleiben bis zu einer expliziten Root-Lizenzfestlegung vermieden.
   Callback-Reconciliation;
 - [x] **TB-HD-02** – produktiver TeeBotus-Provider-v2-Cutover mit Rebind und
   Crash-after-Accept-Härtung;
-- [ ] **PR-HD-Config-v2-Writer** – produktive, revisionsgesicherte Routingconfig
-  und native write-only Credentialgrenze;
+- [ ] **PR-HD-Config-v2-Writer / PR #12** – produktive revisionsgesicherte
+  Routingconfig, Audit und Same-User-API; Implementierung grün, Merge-Gates
+  ausstehend;
+- [ ] **PR-HD-Native-Credentials** – write-only Secret-Service-Operationen und
+  native Recipientprofile;
 - [ ] **PR-HD-Native-Telegram** – nativer Telegramworker mit Bot-API, Formatter,
   Batching, Rate-Limit und Reconciliation.
 
@@ -139,11 +162,13 @@ bleiben bis zu einer expliziten Root-Lizenzfestlegung vermieden.
   No-Fallback und monotone Merge-Semantik implementiert.
 - [x] `TG-C-001..006` Providerbindung, Claims, Capability, Bindings, Lease,
   Heartbeat, Recovery und Konkurrenztests implementiert.
-- [ ] `TG-D-001` produktives Config-v2-Feld und staged Settingseditor.
+- [x] `TG-D-001a` produktives Config-v2-TOML-Feld und strikter Roundtrip.
+- [x] `TG-D-001b` revisionsgesicherte Backendkette
+  `get_redacted → validate → preview → apply` mit Audit und Rollback.
 - [ ] `TG-D-002` native Credentialprofile und write-only Tokenoperationen.
 - [ ] `TG-E-001` nativer Bot-API-Client.
 - [ ] `TG-E-002` Formatter, Segmentierung und Attachmentfallback.
-- [ ] `TG-E-003` Telegram-`retry_after` im echten Adapter; Store-Backoff,
+- [ ] `TG-E-003` Telegram-`retry_after` im echten nativen Adapter; Store-Backoff,
   Jitter und Max Attempts sind vorhanden.
 - [x] `TG-E-004` Partial Results und `possible_duplicate` im Store persistiert.
 - [x] `TG-E-005a` Provider-v2-Recipient-/Completioncallbacks und verschlüsselten
@@ -161,7 +186,8 @@ bleiben bis zu einer expliziten Root-Lizenzfestlegung vermieden.
   stale/leerer Reclaim und Doppelversand-Schutz getestet.
 - [ ] `TG-F-002b` Rate-Limit, Hänger, Oversize und vollständige
   Recipient-Partial-Tests für beide echten Provider abschließen.
-- [ ] `TG-G-001` Appletsettings-Schalter mit Backendrevision.
+- [ ] `TG-G-001` Cinnamon-Settingsschalter gegen Backendrevision und vollständige
+  Credentialgrenze.
 - [x] `TG-G-002` redigierter Provider-, Credential- und Workerstatus als
   Backend-API und Snapshot; Appletdarstellung folgt separat.
 - [ ] `TG-H-001` getrennte TeeBotus-/Native-Canaries.
@@ -192,28 +218,49 @@ den ursprünglichen Recipient- oder Completioncallback.
 
 Transportadapter und Batchworker blockieren zusätzlich jedes
 `reconciliation_only`-Flag im normalen Sendpfad vor Registrierung oder
-Telegram-Send. Damit existieren sowohl Server- als auch Clientseitige
+Telegram-Send. Damit existieren sowohl server- als auch clientseitige
 Defense-in-depth-Grenzen gegen Doppelversand.
 
-## 8. Nächster Schnitt: produktive Config-v2- und Credentialgrenze
+## 8. Produktive Config-v2-Grenze
 
-Der bereits dokumentierte Configvertrag ist noch nicht vollständig produktiv
-integriert. Vor dem nativen Bot-API-Worker folgen deshalb:
+Implementiert sind:
 
-1. striktes Schema für `routing.telegram.provider` in der echten TOML;
-2. revisionsgesicherte `get_redacted → validate → preview → apply`-Operationen;
-3. atomare Backups, Compare-and-Swap und `config_audit`;
-4. opaque Credential- und Recipientprofile;
-5. write-only Secret-Service-Operationen für Bot-Tokens;
-6. Credentialstatus ohne Secretwerte;
-7. Leaktests für TOML, dconf, Status, Snapshot, Logs und API-Antworten.
+1. striktes Schema für `routing.telegram` in der echten TOML;
+2. exakte Providerwerte `teebotus | history_dispatcher`;
+3. opaque Credential- und Recipientprofilnamen;
+4. kanonische Patches und SHA-256-Fingerprints;
+5. 60-Sekunden-One-use-Previewtokens;
+6. Revision-CAS und Bestätigung `APPLY <Fingerprint-Präfix>`;
+7. owner-only atomarer Write und Post-Write-Reload;
+8. bounded `config_audit` ohne Patchwerte oder Tokens;
+9. vollständiger Rollback bei Write-, Reload- oder Auditfehler;
+10. additive Same-User-Socketoperationen und Legacykompatibilität;
+11. Status-v2-Aktualisierung nach Apply;
+12. keine Änderung bestehender Route-Pläne.
 
-## 9. Definition of Done
+Bewusst noch nicht implementiert sind echte Secret-Service-Tokenwrites und die
+Chat-ID-Auflösung nativer Recipientprofile.
+
+## 9. Nächster Schnitt: native Credentialgrenze
+
+Vor dem nativen Bot-API-Worker folgen:
+
+1. Secret-Service-Attribute für opaque Credentialprofile;
+2. write-only Setzen, Ersetzen und Löschen von Bot-Tokens;
+3. Credentialstatus ohne Secretwert;
+4. bestätigter Verbindungstest;
+5. owner-only Auflösung nativer Recipientprofile;
+6. Leaktests für TOML, dconf, Status, Snapshot, Logs, Audit und API-Antworten.
+
+## 10. Definition of Done
 
 - [ ] Native Telegramzustellung funktioniert ohne TeeBotus.
 - [ ] TeeBotus-Live-Canary bestätigt Zustellung über den versionierten
   Providervertrag.
-- [ ] Der Settings-Schalter ändert nur neue Route-Pläne und zeigt eine Preview.
+- [ ] Der Cinnamon-Settingsschalter ändert nur neue Route-Pläne und zeigt eine
+  Preview.
+- [x] Das Backend persistiert und ändert die Providerwahl ausschließlich über
+  Revision, Preview und Audit.
 - [x] Store und Planner erlauben keinen automatischen Fallback oder Doppelclaim.
 - [ ] Tokens und Chat-IDs existieren ausschließlich in der Credentialgrenze.
 - [x] Erfolgreiche Empfänger werden nicht erneut angeboten oder zurückgestuft.

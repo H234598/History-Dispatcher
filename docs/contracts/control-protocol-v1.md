@@ -27,7 +27,7 @@ oder ungültige Frames werden verworfen.
 {
   "protocol_version": 1,
   "request_id": "opaque-id",
-  "operation": "provider.v2.reclaim",
+  "operation": "config.preview_apply",
   "body": {}
 }
 ```
@@ -36,6 +36,12 @@ oder ungültige Frames werden verworfen.
 - `request_id` ist für idempotente Mutationen auf 128 Zeichen begrenzt und darf
   keine Steuerzeichen enthalten;
 - alle `provider.v2.*`-Operationen verlangen eine nicht leere Request-ID;
+- `config.validate_patch` und `config.preview_apply` verlangen eine nicht leere
+  Request-ID;
+- previewgestütztes Config-v2-`config.apply` verlangt eine nicht leere
+  Request-ID;
+- Legacy-`config.apply` mit flachem `values`-Objekt bleibt kompatibel und darf
+  weiterhin ohne Request-ID aufgerufen werden;
 - ein fehlendes `body` entspricht `{}`;
 - ein vorhandenes `body` muss ein JSON-Objekt sein;
 - nicht endliche JSON-Zahlen werden mit `invalid_request` abgewiesen.
@@ -78,7 +84,10 @@ dispatch.complete
 dispatch.retry
 delivery.record
 config.get
+config.get_redacted
 config.validate
+config.validate_patch
+config.preview_apply
 config.apply
 collector.collect
 admin.preview
@@ -99,6 +108,18 @@ provider.v2.heartbeat
 `{ "version": 2, "status": { ... } }`; die v1-Statusoperationen bleiben
 unverändert.
 
+Die Config-v2-Operationen sind additive Same-User-Settingsoperationen:
+
+- `config.get_redacted` liefert ausschließlich Routingrevision und opaque
+  Telegramprofilnamen;
+- `config.validate_patch` validiert und kanonisiert einen Patch;
+- `config.preview_apply` erzeugt einen 60 Sekunden gültigen One-use-Preview;
+- previewgestütztes `config.apply` führt Revision-CAS, atomaren Write, Audit und
+  Rollback aus;
+- Provideränderungen gelten ausschließlich für neue Route-Pläne.
+
+Der vollständige Vertrag steht in `docs/config-v2-api.md`.
+
 Die Provider-v2-Operationen sind additive Same-User-Workeroperationen. Ihr
 vollständiger Body-/Responsevertrag steht in `docs/provider-api-v2.md`.
 
@@ -110,6 +131,7 @@ dispatch.claim
 dispatch.complete
 dispatch.retry
 delivery.record
+config.validate_patch
 config.apply
 collector.collect
 admin.execute
@@ -136,12 +158,20 @@ Für jede solche Request-ID gilt:
    Reservierung offen und der Client erhält `idempotency_persist_failed`.
 8. Retention erfolgt ausschließlich über `maintenance.prune`.
 
+Für previewgestütztes Config-v2-`config.apply` enthält die dauerhaft gespeicherte
+Antwort niemals Previewtoken oder Patchwerte. Derselbe Request-ID-Replay liefert
+die sichere Applyantwort; derselbe verbrauchte Previewtoken mit einer anderen
+Request-ID wird abgewiesen.
+
 ## Sensible One-shot-Mutationen
 
 ```text
 provider.v2.claim
 provider.v2.reclaim
+config.preview_apply
 ```
+
+### Providerclaims
 
 Eine erfolgreiche Antwort mit mindestens einem Claim enthält einen geheimen
 `claim_token`. Sie wird nie in `idempotency_results.response_json` gespeichert.
@@ -158,6 +188,32 @@ Reconciliation begrenzt. Ein erfolgreicher Eintrag trägt
 `reconciliation_only=true`, bindet exakt eine Target-Delivery und darf von einem
 Transportworker nicht als Autorisierung für einen neuen Send interpretiert
 werden.
+
+### Configpreview
+
+`config.preview_apply` liefert einen kurzlebigen geheimen Previewtoken. Die
+Antwort wird nie in `idempotency_results.response_json` gespeichert. Ein
+identischer Request-ID-Replay ergibt `idempotency_in_progress`; ein abweichender
+Replay `idempotency_conflict`.
+
+Reine Patch-/Revisionsvalidierungsfehler geben ihre exakte noch leere
+Reservierung frei. Der Previewtoken selbst wird ausschließlich gehasht im
+begrenzten In-Memory-Previewregister gehalten und erscheint weder in TOML,
+Status, Snapshot noch Audit.
+
+## Config-v2-Bestätigung und Wirkung
+
+Ein produktiver Apply verlangt exakt:
+
+```text
+expected_revision
+preview_token
+fingerprint
+confirmation = APPLY <erste 12 Fingerprint-Zeichen>
+```
+
+Die Wirkung ist hart als `new_route_plans_only` ausgewiesen. Der Apply ändert
+keine bestehenden Route-Pläne und führt keinen Cross-Provider-Fallback aus.
 
 ## Evolutionsregel
 

@@ -18,6 +18,8 @@ Service key.
   routes, targets, recipients, claims, leases and attempts;
 - [`docs/provider-api-v2.md`](docs/provider-api-v2.md) — external worker API,
   one-shot tokens, targeted callback reclaim and shared provider fixture;
+- [`docs/config-v2-api.md`](docs/config-v2-api.md) — productive Telegram routing
+  config, revisioned preview/apply, audit and rollback;
 - [`docs/status-v2-health.md`](docs/status-v2-health.md) — redacted Health API;
 - [`docs/contracts/status-snapshot-v2.md`](docs/contracts/status-snapshot-v2.md)
   — owner-only additive status snapshot;
@@ -55,6 +57,56 @@ the production Secret Service.
 
 The read-only socket operation `status.get_redacted` returns the same v2
 envelope as the new snapshot. Existing v1 status operations remain unchanged.
+
+## Productive Config v2
+
+Telegram routing is persisted in the real TOML config:
+
+```toml
+[routing.telegram]
+provider = "teebotus"
+credential_ref = ""
+recipient_refs = []
+```
+
+Allowed providers are exactly:
+
+```text
+teebotus
+history_dispatcher
+```
+
+`credential_ref` and `recipient_refs` are opaque profile names only. Bot tokens
+and raw Telegram chat IDs are rejected by the config loader and patch API.
+
+The additive Same-User-Socket flow is:
+
+```text
+config.get_redacted
+config.validate_patch
+config.preview_apply
+config.apply
+```
+
+A productive apply requires:
+
+- current config revision;
+- a 60-second one-use preview token;
+- the exact canonical patch fingerprint;
+- confirmation `APPLY <first-12-fingerprint-characters>`;
+- a non-empty Request-ID.
+
+The apply uses compare-and-swap, the existing private atomic TOML writer,
+post-write reload verification, `config_audit`, and full rollback if write,
+reload or audit fails. Its effect is always `new_route_plans_only`: existing
+route plans are not mutated or replanned.
+
+Legacy `config.get`, path-based `config.validate`, and flat safe-values
+`config.apply` remain compatible. See
+[`docs/config-v2-api.md`](docs/config-v2-api.md).
+
+This slice deliberately does not write a Telegram bot token. Native write-only
+Secret-Service credential operations are the next separately reviewed slice.
 
 ## Codex classification fixtures
 
@@ -106,9 +158,10 @@ Completioncallback can be rebound to a new token after a long outage. A worker
 must never use such a claim for a new Telegram send. See
 [`docs/provider-api-v2.md`](docs/provider-api-v2.md).
 
-A native Bot-API worker and write-only Secret-Service credential operations are
-later slices. The current status API therefore exposes no token and reports the
-native credential as not configured.
+The TeeBotus provider is already integrated against this contract. A native
+History-Dispatcher Bot-API worker and write-only Secret-Service credential
+operations remain separate later slices. The current status API therefore
+exposes no token and reports the native credential as not configured.
 
 ## Migrations
 
@@ -142,3 +195,6 @@ python scripts/install_cinnamon_applet.py --dry-run
 
 The Applet remains a bounded snapshot/socket client. It does not read
 credentials, open Telegram connections or participate in delivery claims.
+
+The later provider selector consumes the Config-v2 preview/apply API; it must not
+store provider decisions or credentials in dconf.

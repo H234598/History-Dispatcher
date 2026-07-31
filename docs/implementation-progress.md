@@ -3,9 +3,10 @@
 **Planquelle:** `HISTORY_DISPATCHER_CINNAMON_APPLET_IMPLEMENTIERUNGSPLAN`, SHA-256 `a1f52c11117a063702f4cff008c9d24646f8f33a7540cdd1bf48ab220053ba0c`  
 **Telegram-Addendum:** `docs/implementation-plan-addendum-telegram.md`  
 **Ausgangsbasis:** `main@8f0bb05a540942e61c979a51bbaeca32d4308eb1`  
-**Aktueller History-Dispatcher-Main:** `0934e85e53ae03d97df57ef494cd1aec7d141ef3`  
+**Aktueller History-Dispatcher-Main:** `7d3944bc1bf70114a4b0c381014eabbc3e84c30c`  
 **Aktueller TeeBotus-Main:** `36c75843a5910cc3b22ffdd9a5ec87eb1d5b2ea9`  
-**Nächster Produktschnitt:** produktiver Config-v2-Writer und native write-only Credentialgrenze
+**Aktiver Schnitt:** PR #12 `codex/config-v2-writer`  
+**Nächster separat reviewbarer Schnitt:** native write-only Secret-Service-Credentialgrenze
 
 ## Gemergte History-Dispatcher-Schnitte
 
@@ -21,6 +22,7 @@
 | PR-HD-08a | versionierte Provider-v2-Worker-API | `01c791c252547c3766edfae97f2628a5c3cf6183` |
 | PR-HD-09-plan | Cross-Repository-Rollout und Reihenfolge gepflegt | `c10623c24885618fbacdb4c84e6430359914a185` |
 | PR-HD-08c | gezielter Reclaim abgelaufener Providerclaims | `0934e85e53ae03d97df57ef494cd1aec7d141ef3` |
+| PR-HD-11-plan | Reclaim-/TeeBotus-Merge-SHAs und nächste Reihenfolge synchronisiert | `7d3944bc1bf70114a4b0c381014eabbc3e84c30c` |
 
 ## Gemergte TeeBotus-Schnitte
 
@@ -29,113 +31,118 @@
 | TB-HD-01 / PR-HD-08b | Provider-v2-Client, Claim-/Lease-/Recipient-API und verschlüsselter Callback-Spool | `5989b5129808486a9be272324285e6b5a02e76ab` |
 | TB-HD-02 | expliziter `provider_v2`-Cutover, Batchworker, Reclaim/Rebind und Fault-Härtung | `36c75843a5910cc3b22ffdd9a5ec87eb1d5b2ea9` |
 
-## Abgeschlossener Target-Reclaim
+## Abgeschlossene Provider-v2- und Reclaimgrenze
 
-- [x] additive Operation `provider.v2.reclaim` implementiert;
-- [x] exakte Target-, Provider-, Capability-, Binding- und Attemptprüfung;
-- [x] aktive Claims werden nicht gestohlen;
-- [x] terminale Targets werden nicht wieder geöffnet;
-- [x] stale und Cross-Provider-Reclaims liefern keinen Claim;
-- [x] abgelaufener Claim erzeugt neuen Attempt und neuen One-shot-Token;
-- [x] alter offener Attempt wird als `reclaimed_expired` abgeschlossen;
-- [x] Payload, Binding und Recipientzustände bleiben erhalten;
-- [x] Antwort ist hart mit `reconciliation_only=true` markiert;
-- [x] tokenhaltige Reclaims werden nicht im Idempotenz-Responsecache gespeichert;
-- [x] leere Reclaimantworten sind tokenfrei und sicher replaybar;
-- [x] Test-only-Head rot verifiziert, danach vollständige Actions-, qlty- und
-  CodeRabbit-Gates grün;
-- [x] PR #10 mit erwarteter Head-SHA gemergt.
+- [x] Provider-v2-Claim, Renew, Recipient-, Completion- und Heartbeat-API;
+- [x] tokenhaltige Claims one-shot und tokenfreie leere Polls replaybar;
+- [x] gezielter Reclaim exakt einer abgelaufenen Target-Delivery;
+- [x] Provider-, Capability-, Binding-, Attempt- und Terminalprüfung;
+- [x] `reconciliation_only=true` und Defense-in-depth gegen neuen Send;
+- [x] verschlüsselter TeeBotus-Callback-Spool und atomarer Token-/Attempt-Rebind;
+- [x] kein Cross-Provider-Fallback und kein Doppelversand;
+- [x] vollständige TeeBotus Core-, Benchmark-, Audit-, Plan2-, qlty- und
+  CodeRabbit-Gates.
 
-## Abgeschlossener TeeBotus-Provider-v2-Cutover
+## Aktiver Schnitt: produktiver Config-v2-Writer
 
-### Aktivierung und Kompatibilität
+### Produktives TOML-Modell
 
-- [x] expliziten Modus `TEEBOTUS_HISTORY_DISPATCHER_MODE=provider_v2` ergänzt;
-- [x] `legacy`, `shadow` und `bridge` unverändert gelassen;
-- [x] unbekannte Moduswerte fallen weiter auf `legacy`;
-- [x] innerhalb von `provider_v2` kein automatischer Fallback auf Bridge, Legacy
-  oder den nativen History-Dispatcher-Provider.
+- [x] `[routing.telegram]` in der echten Config implementiert;
+- [x] Provider exakt `teebotus | history_dispatcher`;
+- [x] opaque `credential_ref` und maximal 32 opaque `recipient_refs`;
+- [x] stabile Deduplizierung und TOML-Roundtrip;
+- [x] Tokens, rohe Chat-IDs, Pfade, Steuerzeichen und unbekannte Keys abgewiesen;
+- [x] native Profile im TeeBotus-Modus abgewiesen;
+- [x] Routingwerte in `config_revision()` aufgenommen.
 
-### Fail-closed Worker
+### Patch, Preview und Compare-and-Swap
 
-- [x] verschlüsselten Callback-Spool vor jedem neuen Claim flushen;
-- [x] unresolved Spool blockiert alle neuen Claims und Sends;
-- [x] private routbare Recipientrefs vor dem Claim auflösen;
-- [x] ohne routbare private Route keinen Claim anfordern;
-- [x] dynamische opaque Recipientrefs registrieren;
-- [x] erfolgreiche und `possible_duplicate`-Empfänger nicht erneut senden;
-- [x] Lease vor jedem offenen Telegramtransport verlängern;
-- [x] Recipientresultate vor Targetcompletion persistieren;
-- [x] gespulte Recipient- oder Completioncallbacks blockieren den Batch;
-- [x] phasen-, Target- und Attempt-gebundene Request-IDs verwenden;
-- [x] Heartbeats vor und nach dem Batch senden;
-- [x] rohe Telegram-Message-Refs vor zentraler Persistenz hashen.
+- [x] kanonische, endliche und auf 64 KiB begrenzte Patches;
+- [x] deterministische SHA-256-Fingerprints;
+- [x] 60 Sekunden gültige One-use-Previewtokens;
+- [x] höchstens 128 aktive Previeweinträge;
+- [x] exakte Bestätigung `APPLY <erste 12 Fingerprint-Zeichen>`;
+- [x] Wirkung hart als `new_route_plans_only` ausgewiesen;
+- [x] Revision vor Preview und unmittelbar vor Apply geprüft;
+- [x] Previewtoken vor jeder Mutation verbraucht;
+- [x] Fingerprint und Bestätigung konstantzeitverglichen.
 
-### Verschlüsselter Callback-Rebind
+### Write, Audit und Rollback
 
-- [x] spoolbare Envelopes enthalten Target, Provider, Worker, Capability und
-  vorherige Attemptnummer;
-- [x] ursprünglichen Callback vor jedem Reclaim exakt replayen;
-- [x] Reclaim nur bei eindeutigen Claimablauf-Fehlern versuchen;
-- [x] andere Protokoll-, Transport- und Berechtigungsfehler bleiben unverändert
-  blockierend;
-- [x] gezielt dieselbe Target-Delivery reclaimen;
-- [x] neuen Token, nächsten Attempt und `reconciliation_only=true` prüfen;
-- [x] verschlüsselte Spooldatei atomar auf neuen Token, Attempt und Request-ID
-  umschreiben;
-- [x] ausschließlich den ursprünglichen Recipient-/Completioncallback replayen;
-- [x] nach erneutem Callbackfehler den bereits regebundenen Stand erhalten;
-- [x] Transportadapter und Batchworker lehnen `reconciliation_only` im normalen
-  Sendpfad vor Registrierung und Send ab;
-- [x] kein Claimtoken liegt im Klartext auf Platte.
+- [x] bestehender owner-only atomarer TOML-Writer verwendet;
+- [x] Post-Write-Reload und erwartete neue Revision verifiziert;
+- [x] HMAC-pseudonymisierter Configactor;
+- [x] bounded `config_audit` ohne Patchwerte, Recipientrefs oder Token;
+- [x] fehlende Audittabelle fail-closed;
+- [x] abgewiesene Revisionen und Autorisierungsfehler auditiert;
+- [x] vollständiger Dateirückbau bei Write-, Reload- oder Auditfehler;
+- [x] In-Memory-Config nach Rollback auf vorherigen Stand zurückgeführt.
 
-### Gateevidenz
+### Same-User-Socket und Legacykompatibilität
 
-- [x] fokussierter Provider-v2-/Rebind-Lauf grün;
-- [x] fehlende Reconciliation-Sendgrenze zunächst mit zwei roten Tests
-  reproduziert;
-- [x] Defense-in-depth anschließend in Adapter und Worker umgesetzt;
-- [x] finaler Actions-Lauf `30589642144`: Core, Benchmark, Audit und
-  Plan2-Acceptance vollständig grün;
-- [x] qlty und CodeRabbit auf finalem Head grün;
-- [x] sämtliche Reviewthreads gelöst oder durch entfernte Hilfsworkflows
-  veraltet;
-- [x] TeeBotus PR #3 mit erwarteter Head-SHA gemergt.
+- [x] additive Operation `config.get_redacted`;
+- [x] additive request-idempotente Operation `config.validate_patch`;
+- [x] additive one-shot Operation `config.preview_apply` ohne Token im
+  Idempotenz-Responsecache;
+- [x] previewgestütztes request-idempotentes `config.apply`;
+- [x] Request-ID für neue Config-v2-Mutationen erzwungen;
+- [x] identischer Apply-Replay liefert dieselbe sichere Antwort;
+- [x] verbrauchter Previewtoken unter anderer Request-ID abgewiesen;
+- [x] Same-User-Unix-Socket-End-to-End-Test;
+- [x] `config.get`, path-basiertes `config.validate` und flaches Legacy-
+  `config.apply` unverändert;
+- [x] Legacy-Apply synchronisiert einen bereits erzeugten Config-v2-Manager;
+- [x] Status-v2 veröffentlicht nach Apply den aktuellen Provider;
+- [x] Previewtoken, Bot-Token und rohe Chat-ID fehlen im Snapshot.
+
+### TDD- und Gateevidenz
+
+- [x] Task 1 rot wegen fehlendem `[routing]` reproduziert, danach vollständige
+  Suite und Build grün;
+- [x] Task 2 rot wegen fehlendem `ConfigManagerV2` reproduziert, danach grün;
+- [x] Task 3 rot wegen fehlendem Applypfad reproduziert, danach Actions-Lauf
+  `30591377648` vollständig grün;
+- [x] Task 4 rot mit exakt drei `unknown_operation`-Fehlern und 247 grünen
+  Bestandstests reproduziert;
+- [x] Task 4 anschließend mit vollständiger Suite und Paketbuild grün;
+- [x] temporäre Patchworkflows und Hilfsskripte vollständig entfernt;
+- [ ] finale Dokumentationshead-Actions, qlty und CodeRabbit grün;
+- [ ] keine offenen Reviewthreads;
+- [ ] PR #12 aus Draft genommen und gegen exakte Head-SHA gemergt.
+
+## Bewusste Schnittgrenze
+
+PR #12 schreibt und liest keinen Telegram-Bot-Token. `credential_ref` ist nur
+ein opaque Profilname. Der Status meldet weiterhin keinen geheimen
+Credentialwert. Der Config-v2-Apply verändert ausschließlich zukünftige
+Route-Pläne und führt keine Migration, Neuplanung oder Providerfallbacks aus.
 
 ## Noch offene Telegram-Arbeit
 
-- [ ] produktiven Config-v2-Writer mit Revision, Validate, Preview, Apply und
-  Audit implementieren;
-- [ ] `routing.telegram.provider = teebotus | history_dispatcher` tatsächlich in
-  der produktiven Konfiguration persistieren;
-- [ ] native Credentialprofile und write-only Secret-Service-Tokenoperationen
-  implementieren;
-- [ ] native Recipientprofile ohne rohe Chat-IDs in Status, Config oder Applet
-  implementieren;
-- [ ] nativen Telegram-Bot-API-Client, Formatter und Segmentierung umsetzen;
-- [ ] Telegram-`retry_after`, Rate-Limit, Backoff und Transport-Reconciliation
-  gegen den gemeinsamen Storevertrag anbinden;
-- [ ] nativen systemd-Worker und Heartbeatloop implementieren;
-- [ ] vollständigen gemeinsamen Fault-Korpus für TeeBotus und nativen Provider
-  abschließen;
-- [ ] getrennte Canaries durchführen;
-- [ ] Cinnamon-Settingsschalter erst auf vollständig vorhandener Backend- und
-  Credentialgrenze aktivieren.
+- [ ] native write-only Secret-Service-Operationen zum Setzen, Ersetzen und
+  Löschen eines Bot-Tokens;
+- [ ] Credentialstatus und bestätigter Credentialtest ohne Secretwert;
+- [ ] native Recipientprofile mit Secret-/owner-only Auflösung der Chat-IDs;
+- [ ] nativer Telegram-Bot-API-Client, Formatter und Segmentierung;
+- [ ] Telegram-`retry_after`, Rate-Limit und Transport-Reconciliation;
+- [ ] nativer systemd-Worker und Heartbeatloop;
+- [ ] vollständiger gemeinsamer Fault-Korpus beider Provider;
+- [ ] getrennte Canaries;
+- [ ] Cinnamon-Settingsschalter gegen die vollständige Backend- und
+  Credentialgrenze.
 
 ## Nächster sequenzieller Schnitt
 
-Der nächste Schnitt ist **nicht** sofort der Bot-API-Worker. Zuerst wird die
-bereits dokumentierte, aber noch nicht produktiv integrierte Config-v2- und
-Credentialgrenze abgeschlossen:
+Nach Merge von PR #12 folgt ein eigener Credential-PR:
 
-1. striktes produktives Config-Schema für `routing.telegram.provider`;
-2. revisionsgesicherte `get_redacted → validate → preview → apply`-Kette;
-3. atomare Configbackups und `config_audit`;
-4. write-only Secret-Service-Operationen für native Bot-Tokens;
-5. opaque native Recipientprofile und redigierter Credentialstatus;
-6. Tests gegen Token-, Chat-ID-, Snapshot-, Log- und dconf-Leaks.
+1. Secret-Service-Attribute für opaque Credentialprofile;
+2. write-only Setzen/Ersetzen/Löschen des Bot-Tokens;
+3. Tokenformat- und Secret-Service-Fehlergrenzen;
+4. Credentialstatus `configured` und `last_changed` ohne Tokenwert;
+5. bestätigter Verbindungstest;
+6. Audit-, API-, TOML-, Snapshot-, Log- und dconf-Leaktests.
 
-Erst darauf folgt der native History-Dispatcher-Telegramworker.
+Erst danach folgt der native History-Dispatcher-Telegramworker.
 
 ## Pflegevorgabe
 
