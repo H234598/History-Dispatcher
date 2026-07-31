@@ -41,8 +41,8 @@ def main() -> None:
     progress = FILES["progress"].read_text(encoding="utf-8")
     progress = replace_once(
         progress,
-        "**Aktueller History-Dispatcher-Main:** `decd370f8359979beff59da0b4dbf81208fb044a`",
-        "**Aktueller History-Dispatcher-Main:** `cd35d5807cef1834e0c4d6d6f0a18e81b7e3cda4`",
+        "**Aktueller History-Dispatcher-Main:** `decd370f8359979beff59da0b4dbf81208fb044a`  \n",
+        "**Aktueller History-Dispatcher-Main:** `cd35d5807cef1834e0c4d6d6f0a18e81b7e3cda4`\n",
         label="progress main sha",
     )
     progress = replace_once(
