@@ -22,6 +22,15 @@ class TelegramSecretKind(str, Enum):
     BOT_TOKEN = "bot_token"
     CHAT_ID = "chat_id"
 
+    @classmethod
+    def parse(cls, value: TelegramSecretKind | str) -> TelegramSecretKind:
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(str(value or "").strip().casefold())
+        except ValueError as exc:
+            raise TelegramSecretError("unsupported Telegram secret kind") from exc
+
 
 class TelegramSecretBackend(Protocol):
     def lookup(
@@ -111,7 +120,9 @@ class SecretToolTelegramBackend:
         try:
             value = completed.stdout.decode("utf-8").strip()
         except UnicodeDecodeError as exc:
-            raise TelegramSecretError("Secret Service lookup returned invalid data") from exc
+            raise TelegramSecretError(
+                "Secret Service lookup returned invalid data"
+            ) from exc
         return value or None
 
     def store(
@@ -170,34 +181,68 @@ class NativeTelegramSecretStore:
             raise TelegramSecretError("Telegram chat ID is invalid")
         return value
 
-    def lookup_bot_token(self, profile_ref: object) -> str:
-        profile = self.normalize_profile(profile_ref)
-        value = self.backend.lookup(TelegramSecretKind.BOT_TOKEN, profile)
-        if value is None:
-            raise TelegramSecretError("Telegram bot token is unavailable")
-        return self.validate_bot_token(value)
-
-    def lookup_chat_id(self, profile_ref: object) -> str:
-        profile = self.normalize_profile(profile_ref)
-        value = self.backend.lookup(TelegramSecretKind.CHAT_ID, profile)
-        if value is None:
-            raise TelegramSecretError("Telegram chat ID is unavailable")
+    def validate_value(
+        self,
+        kind: TelegramSecretKind | str,
+        value: object,
+    ) -> str:
+        parsed = TelegramSecretKind.parse(kind)
+        if parsed is TelegramSecretKind.BOT_TOKEN:
+            return self.validate_bot_token(value)
         return self.validate_chat_id(value)
 
-    def store_bot_token(self, profile_ref: object, token: object) -> None:
+    def lookup_optional(
+        self,
+        kind: TelegramSecretKind | str,
+        profile_ref: object,
+    ) -> str | None:
+        parsed = TelegramSecretKind.parse(kind)
         profile = self.normalize_profile(profile_ref)
-        value = self.validate_bot_token(token)
-        self.backend.store(TelegramSecretKind.BOT_TOKEN, profile, value)
+        value = self.backend.lookup(parsed, profile)
+        if value is None:
+            return None
+        return self.validate_value(parsed, value)
+
+    def store_value(
+        self,
+        kind: TelegramSecretKind | str,
+        profile_ref: object,
+        value: object,
+    ) -> None:
+        parsed = TelegramSecretKind.parse(kind)
+        profile = self.normalize_profile(profile_ref)
+        validated = self.validate_value(parsed, value)
+        self.backend.store(parsed, profile, validated)
+
+    def clear_value(
+        self,
+        kind: TelegramSecretKind | str,
+        profile_ref: object,
+    ) -> bool:
+        parsed = TelegramSecretKind.parse(kind)
+        profile = self.normalize_profile(profile_ref)
+        return self.backend.clear(parsed, profile)
+
+    def lookup_bot_token(self, profile_ref: object) -> str:
+        value = self.lookup_optional(TelegramSecretKind.BOT_TOKEN, profile_ref)
+        if value is None:
+            raise TelegramSecretError("Telegram bot token is unavailable")
+        return value
+
+    def lookup_chat_id(self, profile_ref: object) -> str:
+        value = self.lookup_optional(TelegramSecretKind.CHAT_ID, profile_ref)
+        if value is None:
+            raise TelegramSecretError("Telegram chat ID is unavailable")
+        return value
+
+    def store_bot_token(self, profile_ref: object, token: object) -> None:
+        self.store_value(TelegramSecretKind.BOT_TOKEN, profile_ref, token)
 
     def store_chat_id(self, profile_ref: object, chat_id: object) -> None:
-        profile = self.normalize_profile(profile_ref)
-        value = self.validate_chat_id(chat_id)
-        self.backend.store(TelegramSecretKind.CHAT_ID, profile, value)
+        self.store_value(TelegramSecretKind.CHAT_ID, profile_ref, chat_id)
 
     def clear_bot_token(self, profile_ref: object) -> bool:
-        profile = self.normalize_profile(profile_ref)
-        return self.backend.clear(TelegramSecretKind.BOT_TOKEN, profile)
+        return self.clear_value(TelegramSecretKind.BOT_TOKEN, profile_ref)
 
     def clear_chat_id(self, profile_ref: object) -> bool:
-        profile = self.normalize_profile(profile_ref)
-        return self.backend.clear(TelegramSecretKind.CHAT_ID, profile)
+        return self.clear_value(TelegramSecretKind.CHAT_ID, profile_ref)
