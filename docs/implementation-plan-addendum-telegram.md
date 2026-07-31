@@ -186,8 +186,9 @@ H234598/TeeBotus@36c75843a5910cc3b22ffdd9a5ec87eb1d5b2ea9
 - [x] **PR-HD-12** – produktive revisionsgesicherte Routingconfig, Audit und
   Same-User-API;
 - [x] **PR-HD-13** – Secret-Service-Credentialgrenze, Schema v4, Kompensation und write-only Same-User-API; gemergt als `cd35d5807cef1834e0c4d6d6f0a18e81b7e3cda4`;
-- [ ] **PR-HD-Native-Telegram** – nativer Telegramworker mit Bot-API, Formatter,
-  Batching, Rate-Limit und Reconciliation.
+- [ ] **PR-HD-15 / PR-HD-Native-Telegram** – nativer Telegramworker mit
+  fixed-host Bot API, Formatter, Provider-v2-Lifecycle, Rate-Limit und
+  Reconciliation; funktional grün, finale Gates und Merge offen.
 
 ## 7. Sequenzielle Zusatz-Checkboxen
 
@@ -204,22 +205,21 @@ H234598/TeeBotus@36c75843a5910cc3b22ffdd9a5ec87eb1d5b2ea9
 - [x] `TG-D-002b` strikter Secret-Service-Store ohne Fallback oder argv-Leak.
 - [x] `TG-D-002c` write-only Credential-Preview/Apply mit Kompensation.
 - [x] `TG-D-002d` secretfreier Credentialstatus und Same-User-Socket-API.
-- [ ] `TG-E-001` nativer Bot-API-Client.
-- [ ] `TG-E-002` Formatter, Segmentierung und Attachmentfallback.
-- [ ] `TG-E-003` Telegram-`retry_after` im echten nativen Adapter; Store-Backoff,
-  Jitter und Max Attempts sind vorhanden.
+- [x] `TG-E-001` nativer fixed-host Bot-API-Client mit TLS-, Timeout- und Größenlimits.
+- [x] `TG-E-002` deterministischer Plain-Text-Formatter und atomarer Ein-Dokument-Fallback.
+- [x] `TG-E-003` Telegram-`retry_after` im nativen Adapter an den gemeinsamen Store-Backoff übergeben.
 - [x] `TG-E-004` Partial Results und `possible_duplicate` im Store persistiert.
 - [x] `TG-E-005a` Provider-v2-Recipient-/Completioncallbacks und verschlüsselten
   Replay-Spool implementiert.
 - [x] `TG-E-005b` gezielten History-Dispatcher-Reclaim implementiert.
 - [x] `TG-E-005c` TeeBotus-Spool atomar regebunden und Callback ohne Send replayt.
-- [ ] `TG-E-006` nativer systemd-Worker und Heartbeatloop.
+- [x] `TG-E-006` nativer CLI-/systemd-Worker und redigierter Heartbeatloop; Aktivierung explizit opt-in.
 - [x] `TG-F-001a` gemeinsames Provider-v2-Fixture im History-Dispatcher.
 - [x] `TG-F-001b` denselben Fixture-Korpus im TeeBotus-Adapter konsumiert.
 - [x] `TG-F-002a` TeeBotus-Crash-after-Accept, Reclaim/Rebind und
   Doppelversand-Schutz getestet.
-- [ ] `TG-F-002b` Rate-Limit, Hänger, Oversize und vollständige
-  Recipient-Partial-Tests für beide echten Provider.
+- [x] `TG-F-002b-native` Rate-Limit, Connect-/Read-Hänger, Oversize, malformed Response und Recipient-Partial-Fälle für Native getestet.
+- [ ] `TG-F-002b-shared` erweiterten vollständigen Fault-Korpus erneut gegen TeeBotus und Native gemeinsam abnehmen.
 - [ ] `TG-G-001` Cinnamon-Settingsschalter gegen Backendrevision und vollständige
   Credential-/Workergrenze.
 - [x] `TG-G-002` redigierter Provider-, Credential- und Workerstatus als
@@ -247,18 +247,20 @@ Secretwert geschrieben und intern verifiziert hat. Der spätere Worker löst den
 Wert bei jeder Nutzung erneut fail-closed auf, da externe Keyringänderungen
 nicht in den öffentlichen Status zurückgespiegelt werden.
 
-## 10. Nächster Schnitt: nativer Telegramworker
+## 10. Aktiver Schnitt: nativer Telegramworker
 
-Als nächster Schnitt folgen:
+PR #15 hat funktional umgesetzt:
 
-1. interner Bot-Token- und Chat-ID-Lookup;
-2. gehärteter Bot-API-Client mit TLS, Timeouts und bounded Antworten;
-3. deterministische Formatierung und Segmentierung;
+1. internen Bot-Token- und Chat-ID-Lookup unmittelbar vor jedem Send;
+2. fixed-host Bot-API-Client mit TLS, Timeouts und bounded Antworten;
+3. deterministische Plain-Text-Formatierung mit Ein-Dokument-Fallback;
 4. Telegram-`retry_after`, Backoff und Rate-Limit;
-5. empfängerweise Resultate und Crash-after-Accept-Reconciliation;
-6. systemd-User-Worker und Heartbeat;
-7. gemeinsamer Fault-Korpus gegen TeeBotus und Native;
-8. getrennte Canaries ohne Cross-Provider-Doppelversand.
+5. empfängerweise Resultate und Crash-after-Accept-`possible_duplicate`;
+6. explizit opt-in-fähigen systemd-User-Worker und redigierte Heartbeats;
+7. versionierten nativen Fault-Korpus.
+
+Offen bleiben Merge-Gates, getrennte Live-Canaries ohne Cross-Provider-
+Doppelversand und danach die Cinnamon-Providerauswahl.
 
 ## 11. Definition of Done
 

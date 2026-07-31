@@ -194,7 +194,7 @@ PR #15 implementiert den nativen Telegramworker:
 - [x] Workeraktivierung bleibt explizites Opt-in `--enable-telegram-worker`;
 - [x] redigierte Status-v2-Providererkennung aus Heartbeatdetails implementiert;
 - [x] Task-4-Abschlusshead auf Actions-Lauf `30635389842` mit Syntax, vollständiger Testsuite und Paketbuild grün;
-- [ ] Betreiber-Runbook, README, Telegram-Addendum und finalen PR-Vertrag aktualisieren;
+- [x] Betreiber-Runbook `docs/native-telegram-worker.md`, README, Telegram-Addendum und Control-Protokoll aktualisiert;
 - [ ] vollständigen Leak-/Netzwerkgrenzenscan auf finalem Dokumentationshead durchführen;
 - [ ] qlty und CodeRabbit auf finalem Head grün;
 - [ ] keine offenen Reviewthreads;

@@ -22,6 +22,8 @@ Service key.
   config, revisioned preview/apply, audit and rollback;
 - [`docs/native-telegram-credentials.md`](docs/native-telegram-credentials.md)
   — explicit schema-v4 migration and write-only Secret-Service boundary;
+- [`docs/native-telegram-worker.md`](docs/native-telegram-worker.md)
+  — fixed-host Bot API client, formatter, provider-v2 worker and hardened unit;
 - [`docs/status-v2-health.md`](docs/status-v2-health.md) — redacted Health API;
 - [`docs/contracts/status-snapshot-v2.md`](docs/contracts/status-snapshot-v2.md)
   — owner-only additive status snapshot;
@@ -157,8 +159,43 @@ Public status uses metadata only and exposes only:
 
 See [`docs/native-telegram-credentials.md`](docs/native-telegram-credentials.md).
 
-This boundary intentionally performs no Telegram network request. `getMe`, test
-messages and the Bot API worker belong to the next separately reviewed slice.
+The credential API itself performs no Telegram network request. The separately
+reviewed native worker consumes its internal lookup methods immediately before each
+send and never exposes a public credential-read operation.
+
+## Native Telegram worker
+
+The native worker is fixed to `https://api.telegram.org:443`, uses the standard
+verified TLS context, and internally allowlists only `getMe`, `sendMessage`, and
+`sendDocument`. There is no configurable URL, proxy, redirect, HTTP fallback,
+local Bot API server, rich formatting, inbound update path or TeeBotus fallback.
+
+Short payloads are sent as one plain-text message. Longer payloads use exactly
+one bounded UTF-8 text document rather than a multi-request segment sequence.
+This preserves recipient-level atomicity after crashes.
+
+Run interactively:
+
+```bash
+python -m history_dispatcher \
+  --config ~/.config/history-dispatcher/config.toml \
+  telegram-worker
+```
+
+The dedicated systemd unit is rendered but not enabled by default. Explicit
+activation requires:
+
+```bash
+python -m history_dispatcher.systemd \
+  --python /path/to/.venv-py313/bin/python \
+  --config ~/.config/history-dispatcher/config.toml \
+  --enable \
+  --enable-telegram-worker
+```
+
+Only that unit receives `AF_INET/AF_INET6`; the main service and collector remain
+restricted to local Unix/file sockets. See
+[`docs/native-telegram-worker.md`](docs/native-telegram-worker.md).
 
 ## Codex classification fixtures
 
@@ -210,10 +247,12 @@ Completioncallback can be rebound to a new token after a long outage. A worker
 must never use such a claim for a new Telegram send. See
 [`docs/provider-api-v2.md`](docs/provider-api-v2.md).
 
-The TeeBotus provider is already integrated against this contract. The native
-History-Dispatcher worker may now use the internal credential lookup boundary,
-but the Bot API client, formatting, rate-limit handling and systemd worker remain
-the next slice.
+The TeeBotus provider and the native History-Dispatcher worker both use this
+contract. The native worker resolves opaque Secret-Service profiles per recipient,
+renews claims before network access, records recipient outcomes immediately, maps
+Telegram `retry_after` into the shared backoff contract, and preserves uncertain
+post-connect outcomes as monotone `possible_duplicate`. Live canaries remain a
+separate explicit gate.
 
 ## Migrations
 

@@ -453,7 +453,7 @@ git commit -m "feat: run native Telegram worker as hardened user service"
 - Consumes completed client, formatter, worker, CLI and unit.
 - Produces operator runbook, exact fault semantics and next canary/UI boundary.
 
-- [ ] **Step 1: Document the worker contract**
+- [x] **Step 1: Document the worker contract**
 
 Record:
 
@@ -490,11 +490,11 @@ Inspect the full PR diff and verify:
 - no raw Telegram message ID is persisted;
 - `git diff --check` is clean.
 
-- [ ] **Step 4: Update plan and roadmap evidence**
+- [x] **Step 4: Update plan and roadmap evidence**
 
 Mark `TG-E-001`, `TG-E-002`, `TG-E-003`, `TG-E-006` and the native half of `TG-F-002b` complete only with green evidence. Keep live canaries and Cinnamon UI unchecked.
 
-- [ ] **Step 5: Commit documentation**
+- [x] **Step 5: Commit documentation**
 
 ```bash
 git add README.md docs
