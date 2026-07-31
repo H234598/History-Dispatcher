@@ -1,6 +1,6 @@
 # Productive Config v2 Writer Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Persist `routing.telegram.provider`, opaque credential profile names, and opaque recipient profile names through a revisioned, previewed, audited, atomic Config-v2 API without exposing secrets or changing existing route plans.
 
@@ -34,7 +34,7 @@
 - Consumes: `TelegramDispatchProvider` from `history_dispatcher.telegram_provider`.
 - Produces: `DispatcherConfig.telegram_provider: TelegramDispatchProvider`, `telegram_credential_ref: str`, `telegram_recipient_refs: tuple[str, ...]`, and a strict `[routing.telegram]` TOML round trip.
 
-- [ ] **Step 1: Write failing strict-loader and round-trip tests**
+- [x] **Step 1: Write failing strict-loader and round-trip tests**
 
 ```python
 from history_dispatcher.config import load_config, write_config
@@ -77,7 +77,7 @@ Also test:
 def test_routing_telegram_rejects_unsafe_values(tmp_path, toml): ...
 ```
 
-- [ ] **Step 2: Run tests and verify the missing fields/section fail**
+- [x] **Step 2: Run tests and verify the missing fields/section fail**
 
 Run:
 
@@ -87,7 +87,7 @@ python -m pytest tests/test_config_v2_writer_model.py -q --tb=short
 
 Expected: failures because `DispatcherConfig` and `load_config()` do not yet support `[routing.telegram]`.
 
-- [ ] **Step 3: Implement opaque reference normalization and config fields**
+- [x] **Step 3: Implement opaque reference normalization and config fields**
 
 Add focused helpers in `config.py`:
 
@@ -124,7 +124,7 @@ routing.telegram.recipient_refs
 
 Deduplicate recipient refs in stable order and cap them at 32. Reject numeric chat IDs, token-like values, paths, control characters, unknown fields, and a credential/recipient profile without provider `history_dispatcher`.
 
-- [ ] **Step 4: Extend redacted public config and atomic TOML writer**
+- [x] **Step 4: Extend redacted public config and atomic TOML writer**
 
 `public_config()` must add:
 
@@ -149,7 +149,7 @@ recipient_refs = []
 
 The existing temp-file, `fsync`, mode `0600`, backup, and atomic replace behavior remains.
 
-- [ ] **Step 5: Run focused and existing config tests**
+- [x] **Step 5: Run focused and existing config tests**
 
 ```bash
 python -m pytest \
@@ -163,7 +163,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add history_dispatcher/config.py tests/test_config_v2_writer_model.py
@@ -183,7 +183,7 @@ git commit -m "feat: persist strict Telegram routing config"
 - Consumes: `DispatcherConfig`, `config_revision()`, `apply_safe_values()`, productive Telegram routing fields.
 - Produces: `ConfigPatchV2`, `ConfigPreviewV2`, `ConfigManagerV2.get_redacted()`, `validate_patch()`, and `preview_apply()`.
 
-- [ ] **Step 1: Write failing patch and preview tests**
+- [x] **Step 1: Write failing patch and preview tests**
 
 Cover:
 
@@ -221,7 +221,7 @@ patches above 64 KiB
 non-finite JSON
 ```
 
-- [ ] **Step 2: Run tests and verify `ConfigManagerV2` is absent**
+- [x] **Step 2: Run tests and verify `ConfigManagerV2` is absent**
 
 ```bash
 python -m pytest tests/test_config_manager_v2_preview.py -q --tb=short
@@ -229,7 +229,7 @@ python -m pytest tests/test_config_manager_v2_preview.py -q --tb=short
 
 Expected: import failure or missing class.
 
-- [ ] **Step 3: Implement canonical typed patch**
+- [x] **Step 3: Implement canonical typed patch**
 
 Use frozen dataclasses:
 
@@ -258,7 +258,7 @@ The fingerprint is SHA-256 over canonical JSON:
 }
 ```
 
-- [ ] **Step 4: Implement in-memory preview registry**
+- [x] **Step 4: Implement in-memory preview registry**
 
 `ConfigManagerV2` receives injectable `clock` and `token_factory`. Store only:
 
@@ -288,7 +288,7 @@ Keep entries keyed by SHA-256 of the token, cap the registry at 128 entries, pru
 }
 ```
 
-- [ ] **Step 5: Verify deterministic fingerprints and bounded previews**
+- [x] **Step 5: Verify deterministic fingerprints and bounded previews**
 
 ```bash
 python -m pytest tests/test_config_manager_v2_preview.py -q --tb=short
@@ -296,7 +296,7 @@ python -m pytest tests/test_config_manager_v2_preview.py -q --tb=short
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add history_dispatcher/config_manager_v2.py history_dispatcher/config_v2_api.py tests/test_config_manager_v2_preview.py
@@ -315,7 +315,7 @@ git commit -m "feat: add revisioned Config v2 previews"
 - Consumes: preview registry and typed patch from Task 2, existing `write_config()`.
 - Produces: `ConfigManagerV2.apply_preview()` and bounded `config_audit` rows.
 
-- [ ] **Step 1: Write failing apply tests**
+- [x] **Step 1: Write failing apply tests**
 
 Test successful apply:
 
@@ -347,7 +347,7 @@ missing config_audit table
 
 Verify rejected attempts do not mutate the file. Verify successful apply writes exactly one audit row with operation `config.apply_v2`, revision before/after, preview-token hash, result, affected count, reason code, and UTC timestamp. Verify no token, raw recipient value, or secret-like string appears in the audit row.
 
-- [ ] **Step 2: Run tests and verify apply is missing**
+- [x] **Step 2: Run tests and verify apply is missing**
 
 ```bash
 python -m pytest tests/test_config_manager_v2_apply.py -q --tb=short
@@ -355,7 +355,7 @@ python -m pytest tests/test_config_manager_v2_apply.py -q --tb=short
 
 Expected: failures because `apply_preview()` is not implemented.
 
-- [ ] **Step 3: Implement exact one-use compare-and-swap**
+- [x] **Step 3: Implement exact one-use compare-and-swap**
 
 Inside one manager lock:
 
@@ -373,7 +373,7 @@ Use `persistent_opaque_id(key_provider, "config-actor", actor, prefix="actor")` 
 
 If audit persistence fails after the file replace, restore the existing `.bak` atomically, reload the old config, and raise `ConfigApplyError`. The test must prove file and in-memory config return to the prior revision.
 
-- [ ] **Step 4: Implement bounded audit helper**
+- [x] **Step 4: Implement bounded audit helper**
 
 Add private methods:
 
@@ -392,7 +392,7 @@ def _audit_apply(
 
 Require an existing `config_audit` table; do not auto-migrate a production database from the settings path.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 ```bash
 python -m pytest \
@@ -403,7 +403,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add history_dispatcher/config_manager_v2.py tests/test_config_manager_v2_apply.py
@@ -424,7 +424,7 @@ git commit -m "feat: apply Config v2 with audit and rollback"
 - Consumes: `ConfigManagerV2` from Tasks 2–3.
 - Produces: `config.get_redacted`, `config.validate_patch`, `config.preview_apply`, and preview-backed `config.apply`.
 
-- [ ] **Step 1: Write failing service and socket tests**
+- [x] **Step 1: Write failing service and socket tests**
 
 Add operations to the expected allowlist and test:
 
@@ -462,7 +462,7 @@ Also verify:
 - preview-token replay under a different Request-ID fails;
 - responses and `status-v2.json` contain no `preview_token`, bot token, raw chat ID, or secret field after apply.
 
-- [ ] **Step 2: Run tests and verify operations are absent**
+- [x] **Step 2: Run tests and verify operations are absent**
 
 ```bash
 python -m pytest tests/test_config_service_v2.py -q --tb=short
@@ -470,7 +470,7 @@ python -m pytest tests/test_config_service_v2.py -q --tb=short
 
 Expected: `unknown_operation` and missing manager failures.
 
-- [ ] **Step 3: Integrate manager lazily**
+- [x] **Step 3: Integrate manager lazily**
 
 Add:
 
@@ -493,11 +493,11 @@ if "preview_token" in body:
 # otherwise preserve the existing legacy flat safe-values path
 ```
 
-- [ ] **Step 4: Update protocol contract and architecture allowlist**
+- [x] **Step 4: Update protocol contract and architecture allowlist**
 
 Document the additive operations, one-use preview rules, exact confirmation, new-route-plans-only effect, and absence of credentials.
 
-- [ ] **Step 5: Run service, architecture, and snapshot tests**
+- [x] **Step 5: Run service, architecture, and snapshot tests**
 
 ```bash
 python -m pytest \
@@ -509,7 +509,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add history_dispatcher/service.py docs/contracts/control-protocol-v1.md tests/test_config_service_v2.py tests/test_architecture_contract.py
@@ -531,7 +531,7 @@ git commit -m "feat: expose staged Config v2 socket API"
 - Consumes: completed Config-v2 writer/API.
 - Produces: accurate operator contract and next-step boundary for write-only credentials.
 
-- [ ] **Step 1: Update documentation**
+- [x] **Step 1: Update documentation**
 
 Record:
 
@@ -554,7 +554,7 @@ python -m build
 
 Expected: all commands exit 0.
 
-- [ ] **Step 3: Inspect leak boundary**
+- [x] **Step 3: Inspect leak boundary**
 
 ```bash
 grep -RInE 'bot_token|chat_id|123456789:|-1001234567890' \
@@ -564,11 +564,11 @@ grep -RInE 'bot_token|chat_id|123456789:|-1001234567890' \
 
 Expected: no production Config-v2 field or fixture exposes a token or raw chat ID; any documentation mentions are negative security statements only.
 
-- [ ] **Step 4: Update plan checkboxes only with evidence**
+- [x] **Step 4: Update plan checkboxes only with evidence**
 
 Mark productive Config-v2 persistence, preview/apply, audit, and API complete. Keep `TG-D-002` unchecked because Secret-Service write-only credential operations are intentionally the next plan.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add README.md docs
