@@ -16,6 +16,11 @@ from typing import Any
 from . import __version__
 from .config import DispatcherConfig, apply_safe_values, config_revision, load_config, public_config, write_config
 from .crypto import SecretServiceKeyProvider
+from .config_manager_v2 import (
+    ConfigManagerV2,
+    ConfigV2ApplyError,
+    ConfigV2ValidationError,
+)
 from .protocol import ProtocolError, encode_message, read_message
 from .idempotency import IdempotencyConflict, IdempotencyInProgress, IdempotencyStore
 from .delivery_store import DeliveryStore
@@ -36,7 +41,9 @@ OPERATIONS = (
     "protocol.describe", "health.get", "status.get", "status.get_redacted", "report.get",
     "history.append", "history.query",
     "dispatch.claim", "dispatch.complete", "dispatch.retry",
-    "delivery.record", "config.get", "config.validate", "config.apply",
+    "delivery.record", "config.get", "config.get_redacted",
+    "config.validate", "config.validate_patch", "config.preview_apply",
+    "config.apply",
     "collector.collect", "admin.preview", "admin.execute", "audit.query",
     "migration.import_legacy",
     "maintenance.prune",
@@ -44,12 +51,18 @@ OPERATIONS = (
 )
 IDEMPOTENT_OPERATIONS = frozenset({
     "history.append", "dispatch.claim", "dispatch.complete", "dispatch.retry", "delivery.record",
-    "config.apply", "collector.collect", "admin.execute", "migration.import_legacy",
+    "config.validate_patch", "config.apply", "collector.collect",
+    "admin.execute", "migration.import_legacy",
     "maintenance.prune", "provider.v2.renew", "provider.v2.register_recipients",
     "provider.v2.record_recipients", "provider.v2.complete", "provider.v2.heartbeat",
 })
-ONE_SHOT_SENSITIVE_OPERATIONS = frozenset({"provider.v2.claim", "provider.v2.reclaim"})
+ONE_SHOT_SENSITIVE_OPERATIONS = frozenset(
+    {"provider.v2.claim", "provider.v2.reclaim", "config.preview_apply"}
+)
 PROVIDER_REQUEST_ID_REQUIRED = frozenset(PROVIDER_API_OPERATIONS)
+CONFIG_V2_REQUEST_ID_REQUIRED = frozenset(
+    {"config.validate_patch", "config.preview_apply"}
+)
 
 
 def _timestamp() -> str:
@@ -74,6 +87,7 @@ class DispatcherService:
         self.store = DispatcherStore(config.database_path, self.key_provider)
         self.idempotency = IdempotencyStore(config.database_path)
         self._provider_api: ProviderApiV2 | None = None
+        self._config_manager_v2: ConfigManagerV2 | None = None
         self._lock = threading.RLock()
         self._started_at = _timestamp()
         self._last_operation = ""
@@ -82,6 +96,15 @@ class DispatcherService:
         self._last_delivery: dict[str, Any] = {}
         self._tokens: dict[str, tuple[list[str], str, float]] = {}
         self._write_snapshot()
+
+    def _config_v2(self) -> ConfigManagerV2:
+        if self._config_manager_v2 is None:
+            self._config_manager_v2 = ConfigManagerV2(
+                self.config,
+                database_path=self.config.database_path,
+                key_provider=self.key_provider,
+            )
+        return self._config_manager_v2
 
     def _provider_worker_api(self) -> ProviderApiV2:
         if self._provider_api is None:
@@ -136,7 +159,7 @@ class DispatcherService:
         queue = self.store.status()
         status = build_runtime_health_status(
             database_path=self.config.database_path,
-            telegram_provider="teebotus",
+            telegram_provider=self.config.telegram_provider.value,
             credential=CredentialStatus(configured=False),
             queue_counts=dict(queue.get("status_counts", {})),
             generated_at=_timestamp(),
@@ -185,10 +208,28 @@ class DispatcherService:
         if operation not in OPERATIONS:
             return self._error("unknown_operation", "unknown operation")
 
+        config_v2_apply = (
+            operation == "config.apply"
+            and any(
+                key in body
+                for key in (
+                    "preview_token",
+                    "fingerprint",
+                    "confirmation",
+                )
+            )
+        )
         if operation in PROVIDER_REQUEST_ID_REQUIRED and not request_id:
             return self._error(
                 "invalid_request_id",
                 "provider v2 mutations require a request_id",
+            )
+        if (
+            operation in CONFIG_V2_REQUEST_ID_REQUIRED or config_v2_apply
+        ) and not request_id:
+            return self._error(
+                "invalid_request_id",
+                "Config v2 mutations require a request_id",
             )
 
         fingerprint = ""
@@ -238,7 +279,10 @@ class DispatcherService:
             response = self._error("operation_failed", str(exc))
 
         if reservation_active and operation in ONE_SHOT_SENSITIVE_OPERATIONS:
-            if isinstance(operation_exception, ProviderApiValidationError):
+            if isinstance(
+                operation_exception,
+                (ProviderApiValidationError, ConfigV2ValidationError),
+            ):
                 try:
                     self.idempotency.release(
                         request_id,
@@ -294,6 +338,29 @@ class DispatcherService:
             return {"protocol_version": 1, "operations": list(OPERATIONS), "max_frame_bytes": self.config.frame_limit_bytes}
         if operation == "status.get_redacted":
             return self._status_v2()
+        if operation == "config.get_redacted":
+            return self._config_v2().get_redacted()
+        if operation == "config.validate_patch":
+            if set(body) != {"patch"}:
+                raise ConfigV2ValidationError(
+                    "config.validate_patch accepts only patch"
+                )
+            patch = self._config_v2().validate_patch(body.get("patch"))
+            return {
+                "schema_version": 2,
+                "patch": patch.canonical_dict(),
+            }
+        if operation == "config.preview_apply":
+            if set(body) != {"expected_revision", "patch"}:
+                raise ConfigV2ValidationError(
+                    "config.preview_apply requires expected_revision and patch"
+                )
+            return self._config_v2().preview_apply(
+                expected_revision=str(
+                    body.get("expected_revision") or ""
+                ),
+                patch=body.get("patch"),
+            ).as_dict()
         if operation in PROVIDER_API_OPERATIONS:
             return self._provider_worker_api().dispatch(operation, body)
         if operation in {"health.get", "status.get", "report.get"}:
@@ -305,6 +372,27 @@ class DispatcherService:
             checked = load_config(candidate)
             return {"ok": True, "config": public_config(checked)}
         if operation == "config.apply":
+            v2_keys = {
+                "expected_revision",
+                "preview_token",
+                "fingerprint",
+                "confirmation",
+            }
+            if any(key in body for key in v2_keys - {"expected_revision"}):
+                if set(body) != v2_keys:
+                    raise ConfigV2ApplyError(
+                        "Config v2 apply requires expected_revision, preview_token, "
+                        "fingerprint, and confirmation"
+                    )
+                result = self._config_v2().apply_preview(
+                    expected_revision=str(body.get("expected_revision") or ""),
+                    preview_token=str(body.get("preview_token") or ""),
+                    fingerprint=str(body.get("fingerprint") or ""),
+                    confirmation=str(body.get("confirmation") or ""),
+                    actor=f"uid:{os.getuid()}",
+                )
+                self.config = self._config_v2().config
+                return result
             values = body.get("values")
             if not isinstance(values, dict):
                 return {"ok": False, "error": "values_must_be_object"}
@@ -314,6 +402,8 @@ class DispatcherService:
             new_config = apply_safe_values(self.config, values)
             write_config(new_config)
             self.config = load_config(new_config.config_path)
+            if self._config_manager_v2 is not None:
+                self._config_manager_v2.replace_config(self.config)
             return {"ok": True, "config": public_config(self.config), "restart_required": False}
         if operation == "history.append":
             return self.store.append(body, idempotency_key=str(body.get("idempotency_key") or ""))
