@@ -215,6 +215,8 @@ class NativeTelegramWorker:
         ):
             raw_claims = []
             blocked = True
+        if raw_claims:
+            self._heartbeat("active", report)
         for raw_claim in raw_claims:
             report.claimed += 1
             if not isinstance(raw_claim, Mapping):
