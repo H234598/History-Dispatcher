@@ -139,9 +139,10 @@ tests/fixtures/provider-v2/telegram-fault-contract-v1.sha256
 ```
 
 The canonical and vendored History-Dispatcher copies must be byte-identical.
-The TeeBotus copy must be byte-identical to the canonical file. JSON is written
-with UTF-8, LF line endings, two-space indentation, sorted object keys and one
-trailing newline.
+The TeeBotus copy must be byte-identical to the canonical file. JSON is written with UTF-8, LF line endings, two-space indentation, the
+schema-defined field order and one trailing newline. Code examples describe
+semantics; only the committed canonical file defines the digest-bearing byte
+order.
 
 ### 4.2 Top-level schema
 
@@ -206,26 +207,38 @@ opaque_message_seed
 `opaque_message_seed` is test input only. It is not a Telegram message ID and
 must never be copied into persisted evidence.
 
-Every normalized recipient outcome contains exactly:
+Every transport-neutral recipient expectation contains exactly:
 
 ```text
-status
+state_class
 possible_duplicate
 reason_code
 message_ref_required
+minimum_success_rank
 ```
 
-Allowed normalized statuses:
+Allowed `state_class` values:
+
+```text
+success
+retryable_failure
+terminal_failure
+skipped
+possible_duplicate
+```
+
+`minimum_success_rank` is empty for non-success cases and otherwise one of:
 
 ```text
 accepted
 delivered
 acknowledged
-failed
-failed_terminal
-skipped
-possible_duplicate
 ```
+
+Provider adapters preserve their actual status (`accepted`, `delivered` or
+`acknowledged`) and map it to the shared `success` class. This avoids forcing
+TeeBotus and the native worker to use the same internal success rank while still
+testing monotonicity and minimum guarantees.
 
 The target expectation contains:
 
@@ -235,13 +248,26 @@ retry_after_seconds
 error_class
 ```
 
-The safety object contains booleans:
+The safety object contains exactly:
 
 ```text
 must_not_auto_resend
 requires_recipient_persistence_before_complete
-requires_reconciliation_only_replay
+recovery_class
 ```
+
+Allowed `recovery_class` values are:
+
+```text
+none
+retryable
+terminal
+reconciliation_only
+```
+
+`reconciliation_only` means that a new transport send is forbidden. The native
+worker requires operator reconciliation; TeeBotus may replay only its already
+created encrypted callback through a reconciliation-only claim.
 
 ### 4.4 Required cases
 
@@ -453,16 +479,26 @@ History-Dispatcher owns the orchestration CLI:
 python -m history_dispatcher.canary plan
 python -m history_dispatcher.canary run
 python -m history_dispatcher.canary verify
+python -m history_dispatcher.canary compare
 python -m history_dispatcher.canary cleanup
 ```
 
-`plan` is always write-free with respect to Telegram and production state. It:
+`plan` accepts exactly one provider-specific profile set:
+
+```text
+plan --provider history_dispatcher --credential-ref canary_<name> --recipient-ref canary_<name>
+plan --provider teebotus --instance-ref canary_<name> --recipient-ref canary_<name>
+```
+
+It is always write-free with respect to Telegram and production state. It:
 
 1. validates provider selection and `canary_` profiles;
-2. validates required executables and repository versions;
-3. creates no provider claim and performs no Secret-Service lookup;
-4. renders a canonical preview;
-5. produces a SHA-256 fingerprint and exact confirmation string.
+2. resolves and records the current repository commits without modifying them;
+3. validates required executables and isolated-runtime prerequisites;
+4. creates no provider claim and performs no Secret-Service lookup;
+5. generates a new opaque run ID and ten-minute expiry;
+6. renders a canonical owner-only preview file;
+7. produces a SHA-256 fingerprint and exact confirmation string.
 
 The confirmation format is:
 
@@ -477,7 +513,7 @@ SEND TELEGRAM CANARY <provider> <first-12-fingerprint-characters>
 --plan-file <owner-only preview JSON>
 --fingerprint <full SHA-256>
 --confirm "SEND TELEGRAM CANARY <provider> <prefix>"
---run-id <new opaque id>
+--run-id <opaque id copied from the plan file>
 ```
 
 It rejects expired plans older than ten minutes, reused run IDs, changed
@@ -513,10 +549,10 @@ python -m history_dispatcher.canary compare \
 
 `compare` performs no network call. It verifies:
 
-- different run IDs and canary nonce text;
+- different run IDs and different canary nonce hashes;
 - same contract digest;
 - correct immutable provider binding for each run;
-- wrong-provider preflight claims returned zero deliveries;
+- wrong-provider preflight claims returned zero claims;
 - one successful or explicitly uncertain recipient outcome per provider;
 - repeat-worker probe produced zero sends;
 - no event or route plan was consumed by both providers.
