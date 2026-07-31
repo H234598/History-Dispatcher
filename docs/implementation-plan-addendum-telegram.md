@@ -186,9 +186,7 @@ H234598/TeeBotus@36c75843a5910cc3b22ffdd9a5ec87eb1d5b2ea9
 - [x] **PR-HD-12** – produktive revisionsgesicherte Routingconfig, Audit und
   Same-User-API;
 - [x] **PR-HD-13** – Secret-Service-Credentialgrenze, Schema v4, Kompensation und write-only Same-User-API; gemergt als `cd35d5807cef1834e0c4d6d6f0a18e81b7e3cda4`;
-- [ ] **PR-HD-15 / PR-HD-Native-Telegram** – nativer Telegramworker mit
-  fixed-host Bot API, Formatter, Provider-v2-Lifecycle, Rate-Limit und
-  Reconciliation; funktional grün, finale Gates und Merge offen.
+- [x] **PR-HD-15 / PR-HD-Native-Telegram** – nativer Telegramworker mit fixed-host Bot API, Formatter, Provider-v2-Lifecycle, Rate-Limit und Reconciliation; gemergt als `495202ce28592b707a20bb3faeacf020c4d9f639`.
 
 ## 7. Sequenzielle Zusatz-Checkboxen
 
@@ -247,9 +245,9 @@ Secretwert geschrieben und intern verifiziert hat. Der spätere Worker löst den
 Wert bei jeder Nutzung erneut fail-closed auf, da externe Keyringänderungen
 nicht in den öffentlichen Status zurückgespiegelt werden.
 
-## 10. Aktiver Schnitt: nativer Telegramworker
+## 10. Abgeschlossener Schnitt: nativer Telegramworker
 
-PR #15 hat funktional umgesetzt:
+PR #15 hat umgesetzt:
 
 1. internen Bot-Token- und Chat-ID-Lookup unmittelbar vor jedem Send;
 2. fixed-host Bot-API-Client mit TLS, Timeouts und bounded Antworten;
@@ -281,3 +279,11 @@ Doppelversand und danach die Cinnamon-Providerauswahl.
 - [ ] Beide echten Provider bestehen den vollständigen gemeinsamen Contract- und
   Fault-Korpus.
 - [ ] Appletentfernung oder Safe Mode beeinflusst keinen Telegramworker.
+
+
+## 11. Nächster aktiver Schnitt
+
+- erweiterten gemeinsamen Fault-Korpus gegen TeeBotus und Native abnehmen;
+- getrennte Live-Canaries mit dedizierten Testempfängern durchführen;
+- keinen Cross-Provider-Doppelversand nachweisen;
+- Cinnamon-Settingsschalter erst nach diesen Gates aktivieren.

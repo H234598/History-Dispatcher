@@ -1,7 +1,7 @@
 ---
 title: Native Telegram Bot API Worker
 type: operator-runbook
-status: implemented-awaiting-merge
+status: implemented
 date: 2026-07-31
 ---
 
