@@ -25,6 +25,7 @@ _ALLOWED_RECIPIENT_STATUSES = frozenset(
         "delivered",
         "acknowledged",
         "failed",
+        "failed_terminal",
         "skipped",
         "possible_duplicate",
     }
@@ -281,11 +282,9 @@ def _prefer_recipient_outcome(
         return previous
     if current_rank >= 0:
         return current
-    if previous.status == "skipped":
+    if previous.status in {"skipped", "failed_terminal", "possible_duplicate"}:
         return previous
-    if previous.status == "possible_duplicate":
-        return previous
-    if current.status in {"skipped", "possible_duplicate"}:
+    if current.status in {"skipped", "failed_terminal", "possible_duplicate"}:
         return current
     return current
 

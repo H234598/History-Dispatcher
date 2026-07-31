@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "provider_api_schema_version": 2,
+  "native_capability": "history-dispatcher-telegram-native-v1",
+  "cases": [
+    {
+      "name": "success",
+      "results": [
+        {"kind": "success", "message_id": 42}
+      ],
+      "expected": {
+        "statuses": ["delivered"],
+        "possible_duplicate": [false],
+        "reason_codes": [""],
+        "retry_after_seconds": 0
+      }
+    },
+    {
+      "name": "terminal_chat_error",
+      "results": [
+        {
+          "kind": "rejected",
+          "reason_code": "telegram_forbidden",
+          "retryable": false
+        }
+      ],
+      "expected": {
+        "statuses": ["failed_terminal"],
+        "possible_duplicate": [false],
+        "reason_codes": ["telegram_forbidden"],
+        "retry_after_seconds": 0
+      }
+    },
+    {
+      "name": "rate_limited",
+      "results": [
+        {"kind": "rate_limited", "retry_after_seconds": 17}
+      ],
+      "expected": {
+        "statuses": ["failed"],
+        "possible_duplicate": [false],
+        "reason_codes": ["rate_limited"],
+        "retry_after_seconds": 17
+      }
+    },
+    {
+      "name": "connect_failure",
+      "results": [
+        {
+          "kind": "rejected",
+          "reason_code": "telegram_connect_failed",
+          "retryable": true
+        }
+      ],
+      "expected": {
+        "statuses": ["failed"],
+        "possible_duplicate": [false],
+        "reason_codes": ["telegram_connect_failed"],
+        "retry_after_seconds": 0
+      }
+    },
+    {
+      "name": "crash_after_accept",
+      "results": [
+        {
+          "kind": "possible_duplicate",
+          "reason_code": "telegram_accept_unknown"
+        }
+      ],
+      "expected": {
+        "statuses": ["possible_duplicate"],
+        "possible_duplicate": [true],
+        "reason_codes": ["telegram_accept_unknown"],
+        "retry_after_seconds": 0
+      }
+    },
+    {
+      "name": "oversized_response",
+      "results": [
+        {
+          "kind": "possible_duplicate",
+          "reason_code": "telegram_response_too_large"
+        }
+      ],
+      "expected": {
+        "statuses": ["possible_duplicate"],
+        "possible_duplicate": [true],
+        "reason_codes": ["telegram_response_too_large"],
+        "retry_after_seconds": 0
+      }
+    },
+    {
+      "name": "malformed_response",
+      "results": [
+        {
+          "kind": "possible_duplicate",
+          "reason_code": "telegram_protocol_unknown"
+        }
+      ],
+      "expected": {
+        "statuses": ["possible_duplicate"],
+        "possible_duplicate": [true],
+        "reason_codes": ["telegram_protocol_unknown"],
+        "retry_after_seconds": 0
+      }
+    },
+    {
+      "name": "partial_recipients",
+      "results": [
+        {"kind": "success", "message_id": 101},
+        {
+          "kind": "rejected",
+          "reason_code": "telegram_transient",
+          "retryable": true
+        }
+      ],
+      "expected": {
+        "statuses": ["delivered", "failed"],
+        "possible_duplicate": [false, false],
+        "reason_codes": ["", "telegram_transient"],
+        "retry_after_seconds": 0
+      }
+    }
+  ]
+}

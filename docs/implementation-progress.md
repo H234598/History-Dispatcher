@@ -20,11 +20,11 @@ aliases:
 **Planquelle:** `HISTORY_DISPATCHER_CINNAMON_APPLET_IMPLEMENTIERUNGSPLAN`, SHA-256 `a1f52c11117a063702f4cff008c9d24646f8f33a7540cdd1bf48ab220053ba0c`  
 **Telegram-Addendum:** `docs/implementation-plan-addendum-telegram.md`  
 **Ausgangsbasis:** `main@8f0bb05a540942e61c979a51bbaeca32d4308eb1`  
-**Aktueller History-Dispatcher-Main:** `cd35d5807cef1834e0c4d6d6f0a18e81b7e3cda4`
+**Aktueller History-Dispatcher-Main:** `bb335259f16797ec385b2eee13d0fcc49a931426`
 **Aktueller TeeBotus-Main:** `36c75843a5910cc3b22ffdd9a5ec87eb1d5b2ea9`  
-**Abgeschlossener Schnitt:** PR #13 native Telegram-Credentialgrenze
+**Abgeschlossene Schnitte:** PR #13 native Telegram-Credentialgrenze und PR #14 Plan-Sync
 
-**Aktiver nächster Schnitt:** nativer Telegram-Bot-API-Worker
+**Aktiver Schnitt:** PR #15 `codex/native-telegram-worker`
 
 ## Gemergte History-Dispatcher-Schnitte
 
@@ -65,7 +65,7 @@ aliases:
 - [x] PR #12 auf finalem Head `397749480896bd8a52a0ffef78d3bff2c581ff6a` vollständig grün und squash-gemergt;
 - [x] keine Bot-Tokenwrites im Config-v2-Schnitt.
 
-## Aktiver Schnitt: native write-only Telegram-Credentials
+## Abgeschlossener Schnitt: native write-only Telegram-Credentials
 
 ### Architektur und TDD-Plan
 
@@ -162,9 +162,9 @@ Secretwert geschrieben und intern verifiziert hat. Der spätere Worker löst den
 Wert dennoch bei jeder Nutzung fail-closed auf, da externe Keyringänderungen
 nicht über den öffentlichen Status gespiegelt werden.
 
-## Nächster sequenzieller Schnitt
+## Aktiver sequenzieller Schnitt
 
-Als nächster Schnitt folgt der native Telegramworker:
+PR #15 implementiert den nativen Telegramworker:
 
 1. interner Bot-Token- und Chat-ID-Lookup;
 2. gehärteter Bot-API-Client mit TLS, Timeouts und bounded Antworten;
@@ -174,6 +174,34 @@ Als nächster Schnitt folgt der native Telegramworker:
 6. systemd-User-Worker und Heartbeat;
 7. gemeinsamer Fault-Korpus gegen TeeBotus und Native;
 8. getrennte Canaries ohne Cross-Provider-Doppelversand.
+
+
+### PR #15: belegter Fortschritt
+
+- [x] Designspezifikation `docs/superpowers/specs/2026-07-31-native-telegram-worker-design.md` angelegt;
+- [x] ausführbaren TDD-Plan `docs/superpowers/plans/2026-07-31-native-telegram-worker.md` angelegt;
+- [x] festen HTTPS-Client für `api.telegram.org:443` ohne Proxy-, Redirect- oder konfigurierbaren URL-Pfad implementiert;
+- [x] TLS-, Timeout-, Request-, Multipart- und Responsegrenzen getestet;
+- [x] Telegram `retry_after` auf den gemeinsamen Backoffvertrag abgebildet;
+- [x] Fehler vor dem Request retrybar und Fehler nach erfolgreichem Connect als `possible_duplicate` klassifiziert;
+- [x] deterministischen Plain-Text-Formatter mit genau einem UTF-8-Textdokument-Fallback implementiert;
+- [x] native Provider-v2-Claim-/Renew-/Recipient-/Complete-Lifecycle implementiert;
+- [x] Recipientzustand vor jedem Send idempotent geprüft; `possible_duplicate` und andere terminale Empfänger werden nicht erneut gesendet;
+- [x] terminalen Recipientstatus `failed_terminal` im gemeinsamen Telegramvertrag monotone ergänzt;
+- [x] versionierten gemeinsamen Native-Fault-Korpus mit acht Szenarien angelegt;
+- [x] CLI-Befehl `telegram-worker` und Signalstop implementiert;
+- [x] separate gehärtete systemd-Workerunit implementiert; ausschließlich diese Unit erhält `AF_INET/AF_INET6`;
+- [x] Workeraktivierung bleibt explizites Opt-in `--enable-telegram-worker`;
+- [x] redigierte Status-v2-Providererkennung mit `starting → active → idle/degraded/blocked` aus Heartbeatdetails implementiert;
+- [x] Task-4-Abschlusshead auf Actions-Lauf `30635389842` mit Syntax, vollständiger Testsuite und Paketbuild grün;
+- [x] Betreiber-Runbook `docs/native-telegram-worker.md`, README, Telegram-Addendum und Control-Protokoll aktualisiert;
+- [x] finaler Dokumentationshead auf Actions-Lauf `30637002376` mit 364 Tests, Syntax und Paketbuild grün;
+- [x] vollständigen Leak-/Netzwerkgrenzenscan durchgeführt: fixed Host, keine Proxy-/Redirect-/URL-Konfiguration, nur Worker mit `AF_INET/AF_INET6`, keine rohe Message-ID-Persistenz und konkrete Secrets nur in Negativtests;
+- [ ] qlty und CodeRabbit auf finalem Head grün;
+- [ ] keine offenen Reviewthreads;
+- [ ] PR #15 gegen exakte geprüfte Head-SHA squash-mergen;
+- [ ] Live-Canary ohne Cross-Provider-Doppelversand durchführen;
+- [ ] Cinnamon-Providerauswahl aktivieren.
 
 Der Cinnamon-Settingsschalter folgt erst nach vollständig grüner nativer
 Credential- und Workergrenze.

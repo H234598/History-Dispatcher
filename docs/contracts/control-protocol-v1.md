@@ -181,6 +181,14 @@ Metadaten/Audit und kompensierender Rollback sind in
 Die Provider-v2-Operationen sind additive Same-User-Workeroperationen. Ihr
 vollständiger Body-/Responsevertrag steht in `docs/provider-api-v2.md`.
 
+Der native Telegramworker führt keine neue öffentliche Socketoperation ein. Er
+konsumiert `ProviderApiV2` in-process mit der unveränderlichen Bindung
+`telegram/history_dispatcher/history-dispatcher-telegram-native-v1`. Claim,
+Renew, Recipientregistrierung, Recipientresultate, Complete und Heartbeat laufen
+dadurch über denselben validierten Vertrag wie externe Providerworker. Der
+Netzwerktransport und seine Fehlersemantik stehen in
+`docs/native-telegram-worker.md`.
+
 ## Dauerhaft idempotente Mutationen
 
 ```text

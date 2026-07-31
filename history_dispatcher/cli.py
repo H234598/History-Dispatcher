@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
 from .config import load_config, public_config
+from .crypto import SecretServiceKeyProvider, StaticKeyProvider
+from .delivery_store import DeliveryStore
+from .native_telegram_worker import NativeTelegramWorker
 from .protocol import request
+from .provider_api_v2 import ProviderApiV2
 from .service import DispatcherService, call_socket, serve
-from .crypto import StaticKeyProvider
+from .telegram_bot_api import TelegramBotApiClient
+from .telegram_secrets import NativeTelegramSecretStore
 
 
 def _json_print(value: Any) -> None:
@@ -21,6 +28,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=Path, default=None)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("serve")
+    sub.add_parser("telegram-worker")
     status = sub.add_parser("status")
     status.add_argument("--json", action="store_true")
     applet_status = sub.add_parser("applet-status")
@@ -67,7 +75,17 @@ def _parser() -> argparse.ArgumentParser:
     service_action = sub.add_parser("service-action")
     service_action.add_argument("action", choices=("start", "stop", "restart"))
     applet_action = sub.add_parser("applet-action")
-    applet_action.add_argument("--action", choices=("collect", "retry", "service-start", "service-stop", "service-restart"), required=True)
+    applet_action.add_argument(
+        "--action",
+        choices=(
+            "collect",
+            "retry",
+            "service-start",
+            "service-stop",
+            "service-restart",
+        ),
+        required=True,
+    )
     applet_action.add_argument("--item-id", default="")
     applet_action.add_argument("--values-json", default="")
     sub.add_parser("collect")
@@ -78,12 +96,42 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _run_native_telegram_worker(config: Any) -> int:
+    try:
+        key_provider = SecretServiceKeyProvider()
+        delivery_store = DeliveryStore(config.database_path, key_provider)
+        provider_api = ProviderApiV2(delivery_store)
+        secret_store = NativeTelegramSecretStore()
+        client = TelegramBotApiClient()
+        stop_event = threading.Event()
+
+        def request_stop(_signum: int, _frame: object) -> None:
+            stop_event.set()
+
+        signal.signal(signal.SIGTERM, request_stop)
+        signal.signal(signal.SIGINT, request_stop)
+        worker = NativeTelegramWorker(
+            provider_api=provider_api,
+            secret_store=secret_store,
+            client=client,
+            key_provider=key_provider,
+            worker_id="native_telegram_worker",
+        )
+        worker.run_forever(stop_event)
+        return 0
+    except Exception:
+        print("native Telegram worker unavailable", file=sys.stderr)
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     config = load_config(args.config)
     if args.command == "serve":
         serve(config)
         return 0
+    if args.command == "telegram-worker":
+        return _run_native_telegram_worker(config)
     if args.command == "config":
         if args.action == "check":
             _json_print({"ok": True, "config": public_config(config)})
@@ -124,7 +172,15 @@ def main(argv: list[str] | None = None) -> int:
             _json_print(payload)
             return 0
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-            _json_print({"schema_version": 1, "ok": False, "service": "history-dispatcher", "degraded": True, "error": str(exc)[:240]})
+            _json_print(
+                {
+                    "schema_version": 1,
+                    "ok": False,
+                    "service": "history-dispatcher",
+                    "degraded": True,
+                    "error": str(exc)[:240],
+                }
+            )
             return 1
     if args.command == "protocol":
         response = _call(config, "protocol.describe", {})
@@ -136,26 +192,38 @@ def main(argv: list[str] | None = None) -> int:
         except json.JSONDecodeError as exc:
             print(f"invalid payload JSON: {exc}", file=sys.stderr)
             return 2
-        response = _call(config, "history.append", {
-            "source": args.source,
-            "kind": args.kind,
-            "dedupe_key": args.dedupe_key,
-            "target_group": args.target_group,
-            "project": args.project,
-            "payload": payload,
-        })
+        response = _call(
+            config,
+            "history.append",
+            {
+                "source": args.source,
+                "kind": args.kind,
+                "dedupe_key": args.dedupe_key,
+                "target_group": args.target_group,
+                "project": args.project,
+                "payload": payload,
+            },
+        )
         _json_print(response.get("data", response))
         return 0 if response.get("ok") else 1
     if args.command == "query":
-        response = _call(config, "history.query", {
-            "status": args.status,
-            "limit": args.limit,
-            "include_payload": args.include_payload,
-        })
+        response = _call(
+            config,
+            "history.query",
+            {
+                "status": args.status,
+                "limit": args.limit,
+                "include_payload": args.include_payload,
+            },
+        )
         _json_print(response.get("data", response))
         return 0 if response.get("ok") else 1
     if args.command == "claim":
-        response = _call(config, "dispatch.claim", {"worker_id": args.worker_id, "limit": args.limit})
+        response = _call(
+            config,
+            "dispatch.claim",
+            {"worker_id": args.worker_id, "limit": args.limit},
+        )
         _json_print(response.get("data", response))
         return 0 if response.get("ok") else 1
     if args.command == "complete":
@@ -164,16 +232,24 @@ def main(argv: list[str] | None = None) -> int:
         except json.JSONDecodeError as exc:
             print(f"invalid recipient results JSON: {exc}", file=sys.stderr)
             return 2
-        response = _call(config, "dispatch.complete", {
-            "item_id": args.item_id,
-            "worker_id": args.worker_id,
-            "recipient_results": recipient_results,
-            "reason": args.reason,
-        })
+        response = _call(
+            config,
+            "dispatch.complete",
+            {
+                "item_id": args.item_id,
+                "worker_id": args.worker_id,
+                "recipient_results": recipient_results,
+                "reason": args.reason,
+            },
+        )
         _json_print(response.get("data", response))
         return 0 if response.get("ok") else 1
     if args.command == "retry":
-        response = _call(config, "dispatch.retry", {"item_id": args.item_id, "reason": args.reason})
+        response = _call(
+            config,
+            "dispatch.retry",
+            {"item_id": args.item_id, "reason": args.reason},
+        )
         _json_print(response.get("data", response))
         return 0 if response.get("ok") else 1
     if args.command == "admin-preview":
@@ -182,34 +258,51 @@ def main(argv: list[str] | None = None) -> int:
         except json.JSONDecodeError as exc:
             print(f"invalid ids JSON: {exc}", file=sys.stderr)
             return 2
-        response = _call(config, "admin.preview", {"status": args.status, "ids": ids, "limit": args.limit})
+        response = _call(
+            config,
+            "admin.preview",
+            {"status": args.status, "ids": ids, "limit": args.limit},
+        )
         _json_print(response.get("data", response))
         return 0 if response.get("ok") else 1
     if args.command == "admin-execute":
-        response = _call(config, "admin.execute", {
-            "confirmation_token": args.confirmation_token,
-            "confirmation": args.confirmation,
-            "reason": args.reason,
-        })
+        response = _call(
+            config,
+            "admin.execute",
+            {
+                "confirmation_token": args.confirmation_token,
+                "confirmation": args.confirmation,
+                "reason": args.reason,
+            },
+        )
         _json_print(response.get("data", response))
         return 0 if response.get("ok") else 1
     if args.command == "delete-item":
-        preview = _call(config, "admin.preview", {"ids": [args.item_id], "limit": 1})
+        preview = _call(
+            config,
+            "admin.preview",
+            {"ids": [args.item_id], "limit": 1},
+        )
         preview_data = preview.get("data", {})
         token = str(preview_data.get("confirmation_token") or "")
         ids = preview_data.get("ids", [])
         if not preview.get("ok") or len(ids) != 1 or not token:
             _json_print(preview.get("data", preview))
             return 1
-        response = _call(config, "admin.execute", {
-            "confirmation_token": token,
-            "confirmation": "LOESCHEN 1",
-            "reason": args.reason,
-        })
+        response = _call(
+            config,
+            "admin.execute",
+            {
+                "confirmation_token": token,
+                "confirmation": "LOESCHEN 1",
+                "reason": args.reason,
+            },
+        )
         _json_print(response.get("data", response))
         return 0 if response.get("ok") else 1
     if args.command == "service-action":
         import subprocess
+
         completed = subprocess.run(
             ["systemctl", "--user", args.action, "history-dispatcher.service"],
             check=False,
@@ -219,7 +312,11 @@ def main(argv: list[str] | None = None) -> int:
             errors="replace",
             timeout=30,
         )
-        result = {"ok": completed.returncode == 0, "action": args.action, "stderr": completed.stderr[-1000:]}
+        result = {
+            "ok": completed.returncode == 0,
+            "action": args.action,
+            "stderr": completed.stderr[-1000:],
+        }
         _json_print(result)
         return 0 if result["ok"] else 1
     if args.command == "applet-action":
@@ -230,12 +327,22 @@ def main(argv: list[str] | None = None) -> int:
             if not args.item_id:
                 _json_print({"ok": False, "error": "missing_item_id"})
                 return 2
-            response = _call(config, "dispatch.retry", {"item_id": args.item_id, "reason": "Applet retry"})
+            response = _call(
+                config,
+                "dispatch.retry",
+                {"item_id": args.item_id, "reason": "Applet retry"},
+            )
         else:
             import subprocess
+
             service_action = action.removeprefix("service-")
             completed = subprocess.run(
-                ["systemctl", "--user", service_action, "history-dispatcher.service"],
+                [
+                    "systemctl",
+                    "--user",
+                    service_action,
+                    "history-dispatcher.service",
+                ],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -243,7 +350,11 @@ def main(argv: list[str] | None = None) -> int:
                 errors="replace",
                 timeout=30,
             )
-            result = {"ok": completed.returncode == 0, "action": action, "stderr": completed.stderr[-1000:]}
+            result = {
+                "ok": completed.returncode == 0,
+                "action": action,
+                "stderr": completed.stderr[-1000:],
+            }
             _json_print(result)
             return 0 if result["ok"] else 1
         _json_print(response.get("data", response))
@@ -253,7 +364,11 @@ def main(argv: list[str] | None = None) -> int:
         _json_print(response.get("data", response))
         return 0 if response.get("ok") else 1
     if args.command == "migrate-legacy":
-        response = _call(config, "migration.import_legacy", {"path": str(args.path), "dry_run": bool(args.dry_run)})
+        response = _call(
+            config,
+            "migration.import_legacy",
+            {"path": str(args.path), "dry_run": bool(args.dry_run)},
+        )
         _json_print(response.get("data", response))
         return 0 if response.get("ok") else 1
     if args.command == "prune":
@@ -263,14 +378,27 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
-def _call(config, operation: str, body: dict[str, Any]) -> dict[str, Any]:
+def _call(config: Any, operation: str, body: dict[str, Any]) -> dict[str, Any]:
     try:
-        return call_socket(config.socket_path, request(operation, body), max_bytes=config.frame_limit_bytes)
+        return call_socket(
+            config.socket_path,
+            request(operation, body),
+            max_bytes=config.frame_limit_bytes,
+        )
     except OSError:
         if operation in {"status.get", "health.get"}:
-            service = DispatcherService(config, key_provider=StaticKeyProvider(b"\x00" * 32))
+            service = DispatcherService(
+                config,
+                key_provider=StaticKeyProvider(b"\x00" * 32),
+            )
             return {"ok": True, "data": service._status()}
-        return {"ok": False, "error": {"code": "dispatcher_unavailable", "message": "control socket unavailable"}}
+        return {
+            "ok": False,
+            "error": {
+                "code": "dispatcher_unavailable",
+                "message": "control socket unavailable",
+            },
+        }
 
 
 if __name__ == "__main__":
