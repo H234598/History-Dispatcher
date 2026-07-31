@@ -114,21 +114,22 @@ For every batch the worker:
 
 1. records a `starting` heartbeat;
 2. claims only native Telegram deliveries through `provider.v2.claim`;
-3. validates target, provider, capability, worker and immutable binding;
-4. rejects `reconciliation_only` claims before secret lookup or network access;
-5. formats the payload once;
-6. idempotently registers planned recipient profiles;
-7. reads each returned recipient state;
-8. skips terminal states, including `possible_duplicate` and
+3. records an `active` heartbeat when at least one claim was returned;
+4. validates target, provider, capability, worker and immutable binding;
+5. rejects `reconciliation_only` claims before secret lookup or network access;
+6. formats the payload once;
+7. idempotently registers planned recipient profiles;
+8. reads each returned recipient state;
+9. skips terminal states, including `possible_duplicate` and
    `failed_terminal`;
-9. renews the target claim before every network request;
-10. resolves the Bot token and recipient chat ID from Secret Service;
-11. applies global and per-recipient pacing;
-12. sends one message or one document;
-13. persists the recipient result immediately;
-14. completes the target with the shared aggregation and maximum
+10. renews the target claim before every network request;
+11. resolves the Bot token and recipient chat ID from Secret Service;
+12. applies global and per-recipient pacing;
+13. sends one message or one document;
+14. persists the recipient result immediately;
+15. completes the target with the shared aggregation and maximum
     `retry_after`;
-15. records an `idle`, `degraded` or `blocked` heartbeat.
+16. records an `idle`, `degraded` or `blocked` heartbeat.
 
 The raw Telegram message ID is never persisted. A successful ID is transformed
 into an HMAC-derived opaque `message_ref_key`.
