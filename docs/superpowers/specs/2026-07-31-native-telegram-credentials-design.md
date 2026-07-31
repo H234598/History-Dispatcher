@@ -7,7 +7,7 @@ tags:
   - secret-service
   - security
 type: design-spec
-status: approved
+status: implemented
 created: 2026-07-31
 date: 2026-07-31
 aliases:

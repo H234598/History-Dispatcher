@@ -185,8 +185,7 @@ H234598/TeeBotus@36c75843a5910cc3b22ffdd9a5ec87eb1d5b2ea9
 - [x] **TB-HD-02** – produktiver TeeBotus-Provider-v2-Cutover;
 - [x] **PR-HD-12** – produktive revisionsgesicherte Routingconfig, Audit und
   Same-User-API;
-- [ ] **PR-HD-13** – Secret-Service-Credentialgrenze, Schema v4 und write-only
-  Same-User-API; funktional grün, finale Dokumentations-/Merge-Gates offen;
+- [x] **PR-HD-13** – Secret-Service-Credentialgrenze, Schema v4, Kompensation und write-only Same-User-API; gemergt als `cd35d5807cef1834e0c4d6d6f0a18e81b7e3cda4`;
 - [ ] **PR-HD-Native-Telegram** – nativer Telegramworker mit Bot-API, Formatter,
   Batching, Rate-Limit und Reconciliation.
 
@@ -237,7 +236,7 @@ und replayt ausschließlich den ursprünglichen Recipient- oder
 Completioncallback. Transportadapter und Batchworker blockieren zusätzlich
 jedes `reconciliation_only`-Flag vor einem neuen Send.
 
-## 9. Bewusste Schnittgrenze von PR #13
+## 9. Bewusste Grenze des gemergten PR #13
 
 PR #13 führt keine Telegram-Netzwerkoperation aus. Es gibt keinen Bot-API-Client,
 kein `getMe`, keine Testnachricht, keine Formatierung, kein Rate-Limit und keinen
@@ -250,7 +249,7 @@ nicht in den öffentlichen Status zurückgespiegelt werden.
 
 ## 10. Nächster Schnitt: nativer Telegramworker
 
-Nach Merge von PR #13 folgen:
+Als nächster Schnitt folgen:
 
 1. interner Bot-Token- und Chat-ID-Lookup;
 2. gehärteter Bot-API-Client mit TLS, Timeouts und bounded Antworten;
