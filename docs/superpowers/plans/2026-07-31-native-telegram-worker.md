@@ -1,7 +1,7 @@
 ---
 title: Native Telegram Worker Implementation Plan
 type: implementation-plan
-status: active
+status: completed
 date: 2026-07-31
 ---
 
@@ -506,7 +506,7 @@ git add README.md docs
 git commit -m "docs: complete native Telegram worker contract"
 ```
 
-- [ ] **Step 6: Enforce hard merge gates**
+- [x] **Step 6: Enforce hard merge gates**
 
 Create or update a draft PR titled:
 
@@ -515,3 +515,14 @@ feat: add native Telegram Bot API worker
 ```
 
 Require GitHub Actions, qlty, CodeRabbit and zero unresolved review threads on the exact final head SHA. Mark ready and squash-merge only against that SHA. Add a post-merge docs-only plan sync if merge-dependent checkboxes require the resulting main commit.
+
+
+## Merge evidence
+
+- Final verified PR head: `0bb736ee4b6360b12c2a291d8ae3b1c5a4842f63`.
+- GitHub Actions run `30637266609` passed syntax, 364 tests and package build.
+- qlty and CodeRabbit were green on the exact final head.
+- Pull request #15 had zero unresolved review threads.
+- Pull request #15 was squash-merged against the exact final head.
+- Main commit: `495202ce28592b707a20bb3faeacf020c4d9f639`.
+- Live Telegram canaries and Cinnamon settings remain intentionally outside this completed implementation plan.

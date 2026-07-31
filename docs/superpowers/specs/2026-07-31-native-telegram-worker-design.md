@@ -1,7 +1,7 @@
 ---
 title: Native Telegram Worker Design
 type: design-spec
-status: approved
+status: implemented
 date: 2026-07-31
 scope: history-dispatcher
 ---

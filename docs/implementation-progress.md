@@ -20,11 +20,11 @@ aliases:
 **Planquelle:** `HISTORY_DISPATCHER_CINNAMON_APPLET_IMPLEMENTIERUNGSPLAN`, SHA-256 `a1f52c11117a063702f4cff008c9d24646f8f33a7540cdd1bf48ab220053ba0c`  
 **Telegram-Addendum:** `docs/implementation-plan-addendum-telegram.md`  
 **Ausgangsbasis:** `main@8f0bb05a540942e61c979a51bbaeca32d4308eb1`  
-**Aktueller History-Dispatcher-Main:** `bb335259f16797ec385b2eee13d0fcc49a931426`
+**Aktueller History-Dispatcher-Main:** `495202ce28592b707a20bb3faeacf020c4d9f639`
 **Aktueller TeeBotus-Main:** `36c75843a5910cc3b22ffdd9a5ec87eb1d5b2ea9`  
-**Abgeschlossene Schnitte:** PR #13 native Telegram-Credentialgrenze und PR #14 Plan-Sync
+**Abgeschlossene Schnitte:** PR #13 Credentialgrenze, PR #14 Plan-Sync und PR #15 nativer Telegramworker
 
-**Aktiver Schnitt:** PR #15 `codex/native-telegram-worker`
+**Aktiver Schnitt:** gemeinsamer TeeBotus/Native-Fault-Abgleich und getrennte Live-Canaries
 
 ## Gemergte History-Dispatcher-Schnitte
 
@@ -43,6 +43,8 @@ aliases:
 | PR-HD-11-plan | Reclaim-/TeeBotus-Merge-SHAs synchronisiert | `7d3944bc1bf70114a4b0c381014eabbc3e84c30c` |
 | PR-HD-12 | produktiver Config-v2-Writer, Preview/Apply, Audit und Same-User-API | `decd370f8359979beff59da0b4dbf81208fb044a` |
 | PR-HD-13 | Secret-Service-Credentialgrenze, Schema v4, Kompensation und write-only Same-User-API | `cd35d5807cef1834e0c4d6d6f0a18e81b7e3cda4` |
+| PR-HD-14-plan | Credential-Merge-Evidenz und nächster aktiver Schnitt synchronisiert | `bb335259f16797ec385b2eee13d0fcc49a931426` |
+| PR-HD-15 | fixed-host Bot API, Formatter, nativer Provider-v2-Worker, Rate-Limit und hardened systemd | `495202ce28592b707a20bb3faeacf020c4d9f639` |
 
 ## Gemergte TeeBotus-Schnitte
 
@@ -162,9 +164,9 @@ Secretwert geschrieben und intern verifiziert hat. Der spätere Worker löst den
 Wert dennoch bei jeder Nutzung fail-closed auf, da externe Keyringänderungen
 nicht über den öffentlichen Status gespiegelt werden.
 
-## Aktiver sequenzieller Schnitt
+## Abgeschlossener sequenzieller Schnitt: nativer Telegramworker
 
-PR #15 implementiert den nativen Telegramworker:
+PR #15 implementierte den nativen Telegramworker:
 
 1. interner Bot-Token- und Chat-ID-Lookup;
 2. gehärteter Bot-API-Client mit TLS, Timeouts und bounded Antworten;
@@ -197,11 +199,19 @@ PR #15 implementiert den nativen Telegramworker:
 - [x] Betreiber-Runbook `docs/native-telegram-worker.md`, README, Telegram-Addendum und Control-Protokoll aktualisiert;
 - [x] finaler Dokumentationshead auf Actions-Lauf `30637002376` mit 364 Tests, Syntax und Paketbuild grün;
 - [x] vollständigen Leak-/Netzwerkgrenzenscan durchgeführt: fixed Host, keine Proxy-/Redirect-/URL-Konfiguration, nur Worker mit `AF_INET/AF_INET6`, keine rohe Message-ID-Persistenz und konkrete Secrets nur in Negativtests;
-- [ ] qlty und CodeRabbit auf finalem Head grün;
-- [ ] keine offenen Reviewthreads;
-- [ ] PR #15 gegen exakte geprüfte Head-SHA squash-mergen;
+- [x] qlty und CodeRabbit auf finalem Head `0bb736ee4b6360b12c2a291d8ae3b1c5a4842f63` grün;
+- [x] keine offenen Reviewthreads;
+- [x] PR #15 gegen `0bb736ee4b6360b12c2a291d8ae3b1c5a4842f63` squash-gemergt; Main-Commit `495202ce28592b707a20bb3faeacf020c4d9f639`;
 - [ ] Live-Canary ohne Cross-Provider-Doppelversand durchführen;
 - [ ] Cinnamon-Providerauswahl aktivieren.
+
+
+## Nächster aktiver Schnitt
+
+1. den erweiterten vollständigen Fault-Korpus erneut gegen TeeBotus und Native gemeinsam abnehmen;
+2. getrennte TeeBotus- und Native-Live-Canaries mit dedizierten Testempfängern durchführen;
+3. explizit nachweisen, dass kein Cross-Provider-Doppelversand entsteht;
+4. erst danach Cinnamon-Providerauswahl und Settings-UX aktivieren.
 
 Der Cinnamon-Settingsschalter folgt erst nach vollständig grüner nativer
 Credential- und Workergrenze.
