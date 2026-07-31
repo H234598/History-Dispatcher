@@ -21,6 +21,11 @@ from .config_manager_v2 import (
     ConfigV2ApplyError,
     ConfigV2ValidationError,
 )
+from .credential_manager import (
+    CredentialApplyError,
+    CredentialManager,
+    CredentialValidationError,
+)
 from .protocol import ProtocolError, encode_message, read_message
 from .idempotency import IdempotencyConflict, IdempotencyInProgress, IdempotencyStore
 from .delivery_store import DeliveryStore
@@ -35,6 +40,7 @@ from .status_api_v2 import build_redacted_status_response
 from .status_runtime_v2 import build_runtime_health_status
 from .status_snapshot_v2 import write_status_v2_snapshot
 from .status_v2 import CredentialStatus
+from .telegram_secrets import NativeTelegramSecretStore
 
 
 OPERATIONS = (
@@ -44,6 +50,8 @@ OPERATIONS = (
     "delivery.record", "config.get", "config.get_redacted",
     "config.validate", "config.validate_patch", "config.preview_apply",
     "config.apply",
+    "credential.get_status", "credential.preview_apply",
+    "credential.apply",
     "collector.collect", "admin.preview", "admin.execute", "audit.query",
     "migration.import_legacy",
     "maintenance.prune",
@@ -51,17 +59,26 @@ OPERATIONS = (
 )
 IDEMPOTENT_OPERATIONS = frozenset({
     "history.append", "dispatch.claim", "dispatch.complete", "dispatch.retry", "delivery.record",
-    "config.validate_patch", "config.apply", "collector.collect",
+    "config.validate_patch", "config.apply", "credential.apply",
+    "collector.collect",
     "admin.execute", "migration.import_legacy",
     "maintenance.prune", "provider.v2.renew", "provider.v2.register_recipients",
     "provider.v2.record_recipients", "provider.v2.complete", "provider.v2.heartbeat",
 })
 ONE_SHOT_SENSITIVE_OPERATIONS = frozenset(
-    {"provider.v2.claim", "provider.v2.reclaim", "config.preview_apply"}
+    {
+        "provider.v2.claim",
+        "provider.v2.reclaim",
+        "config.preview_apply",
+        "credential.preview_apply",
+    }
 )
 PROVIDER_REQUEST_ID_REQUIRED = frozenset(PROVIDER_API_OPERATIONS)
 CONFIG_V2_REQUEST_ID_REQUIRED = frozenset(
     {"config.validate_patch", "config.preview_apply"}
+)
+CREDENTIAL_REQUEST_ID_REQUIRED = frozenset(
+    {"credential.preview_apply", "credential.apply"}
 )
 
 
@@ -81,13 +98,23 @@ def _request_fingerprint(operation: str, body: dict[str, Any]) -> str:
 
 
 class DispatcherService:
-    def __init__(self, config: DispatcherConfig, *, key_provider: SecretServiceKeyProvider | None = None) -> None:
+    def __init__(
+        self,
+        config: DispatcherConfig,
+        *,
+        key_provider: SecretServiceKeyProvider | None = None,
+        telegram_secret_store: NativeTelegramSecretStore | None = None,
+    ) -> None:
         self.config = config
         self.key_provider = key_provider or SecretServiceKeyProvider()
+        self._telegram_secret_store = (
+            telegram_secret_store or NativeTelegramSecretStore()
+        )
         self.store = DispatcherStore(config.database_path, self.key_provider)
         self.idempotency = IdempotencyStore(config.database_path)
         self._provider_api: ProviderApiV2 | None = None
         self._config_manager_v2: ConfigManagerV2 | None = None
+        self._credential_manager: CredentialManager | None = None
         self._lock = threading.RLock()
         self._started_at = _timestamp()
         self._last_operation = ""
@@ -96,6 +123,34 @@ class DispatcherService:
         self._last_delivery: dict[str, Any] = {}
         self._tokens: dict[str, tuple[list[str], str, float]] = {}
         self._write_snapshot()
+
+    def _credentials(self) -> CredentialManager:
+        if self._credential_manager is None:
+            self._credential_manager = CredentialManager(
+                self.config,
+                database_path=self.config.database_path,
+                key_provider=self.key_provider,
+                secret_store=self._telegram_secret_store,
+            )
+        return self._credential_manager
+
+    def _credential_status(self) -> CredentialStatus:
+        if not self.config.telegram_credential_ref:
+            return CredentialStatus(configured=False)
+        try:
+            bot = self._credentials().get_status()["bot"]
+            if not isinstance(bot, dict):
+                return CredentialStatus(configured=False)
+            return CredentialStatus(
+                configured=bool(bot.get("configured")),
+                last_changed=(
+                    str(bot.get("last_changed"))
+                    if bot.get("last_changed")
+                    else None
+                ),
+            )
+        except Exception:
+            return CredentialStatus(configured=False)
 
     def _config_v2(self) -> ConfigManagerV2:
         if self._config_manager_v2 is None:
@@ -160,7 +215,7 @@ class DispatcherService:
         status = build_runtime_health_status(
             database_path=self.config.database_path,
             telegram_provider=self.config.telegram_provider.value,
-            credential=CredentialStatus(configured=False),
+            credential=self._credential_status(),
             queue_counts=dict(queue.get("status_counts", {})),
             generated_at=_timestamp(),
         )
@@ -231,6 +286,11 @@ class DispatcherService:
                 "invalid_request_id",
                 "Config v2 mutations require a request_id",
             )
+        if operation in CREDENTIAL_REQUEST_ID_REQUIRED and not request_id:
+            return self._error(
+                "invalid_request_id",
+                "credential mutations require a request_id",
+            )
 
         fingerprint = ""
         reservation_active = False
@@ -281,7 +341,11 @@ class DispatcherService:
         if reservation_active and operation in ONE_SHOT_SENSITIVE_OPERATIONS:
             if isinstance(
                 operation_exception,
-                (ProviderApiValidationError, ConfigV2ValidationError),
+                (
+                    ProviderApiValidationError,
+                    ConfigV2ValidationError,
+                    CredentialValidationError,
+                ),
             ):
                 try:
                     self.idempotency.release(
@@ -338,6 +402,43 @@ class DispatcherService:
             return {"protocol_version": 1, "operations": list(OPERATIONS), "max_frame_bytes": self.config.frame_limit_bytes}
         if operation == "status.get_redacted":
             return self._status_v2()
+        if operation == "credential.get_status":
+            if body:
+                raise CredentialValidationError(
+                    "credential.get_status accepts an empty body"
+                )
+            return self._credentials().get_status()
+        if operation == "credential.preview_apply":
+            allowed = {
+                "action",
+                "secret_kind",
+                "profile_ref",
+                "secret_value",
+            }
+            required = {"action", "secret_kind", "profile_ref"}
+            if not required <= set(body) or set(body) - allowed:
+                raise CredentialValidationError(
+                    "credential.preview_apply body is invalid"
+                )
+            return self._credentials().preview_apply(
+                action=str(body.get("action") or ""),
+                secret_kind=str(body.get("secret_kind") or ""),
+                profile_ref=body.get("profile_ref"),
+                secret_value=body.get("secret_value"),
+            ).as_dict()
+        if operation == "credential.apply":
+            required = {"preview_token", "fingerprint", "confirmation"}
+            if set(body) != required:
+                raise CredentialApplyError(
+                    "credential.apply requires preview_token, fingerprint, "
+                    "and confirmation"
+                )
+            return self._credentials().apply_preview(
+                preview_token=str(body.get("preview_token") or ""),
+                fingerprint=str(body.get("fingerprint") or ""),
+                confirmation=str(body.get("confirmation") or ""),
+                actor=f"uid:{os.getuid()}",
+            )
         if operation == "config.get_redacted":
             return self._config_v2().get_redacted()
         if operation == "config.validate_patch":
@@ -392,6 +493,8 @@ class DispatcherService:
                     actor=f"uid:{os.getuid()}",
                 )
                 self.config = self._config_v2().config
+                if self._credential_manager is not None:
+                    self._credential_manager.replace_config(self.config)
                 return result
             values = body.get("values")
             if not isinstance(values, dict):
@@ -404,6 +507,8 @@ class DispatcherService:
             self.config = load_config(new_config.config_path)
             if self._config_manager_v2 is not None:
                 self._config_manager_v2.replace_config(self.config)
+            if self._credential_manager is not None:
+                self._credential_manager.replace_config(self.config)
             return {"ok": True, "config": public_config(self.config), "restart_required": False}
         if operation == "history.append":
             return self.store.append(body, idempotency_key=str(body.get("idempotency_key") or ""))

@@ -20,6 +20,8 @@ Service key.
   one-shot tokens, targeted callback reclaim and shared provider fixture;
 - [`docs/config-v2-api.md`](docs/config-v2-api.md) — productive Telegram routing
   config, revisioned preview/apply, audit and rollback;
+- [`docs/native-telegram-credentials.md`](docs/native-telegram-credentials.md)
+  — explicit schema-v4 migration and write-only Secret-Service boundary;
 - [`docs/status-v2-health.md`](docs/status-v2-health.md) — redacted Health API;
 - [`docs/contracts/status-snapshot-v2.md`](docs/contracts/status-snapshot-v2.md)
   — owner-only additive status snapshot;
@@ -88,25 +90,75 @@ config.preview_apply
 config.apply
 ```
 
-A productive apply requires:
+A productive apply requires the current revision, a 60-second one-use preview
+token, the canonical fingerprint, confirmation
+`APPLY <first-12-fingerprint-characters>` and a Request-ID.
 
-- current config revision;
-- a 60-second one-use preview token;
-- the exact canonical patch fingerprint;
-- confirmation `APPLY <first-12-fingerprint-characters>`;
-- a non-empty Request-ID.
-
-The apply uses compare-and-swap, the existing private atomic TOML writer,
-post-write reload verification, `config_audit`, and full rollback if write,
-reload or audit fails. Its effect is always `new_route_plans_only`: existing
-route plans are not mutated or replanned.
+The apply uses compare-and-swap, the private atomic TOML writer, post-write
+reload verification, `config_audit`, and full rollback if write, reload or audit
+fails. Its effect is always `new_route_plans_only`: existing route plans are not
+mutated or replanned.
 
 Legacy `config.get`, path-based `config.validate`, and flat safe-values
 `config.apply` remain compatible. See
 [`docs/config-v2-api.md`](docs/config-v2-api.md).
 
-This slice deliberately does not write a Telegram bot token. Native write-only
-Secret-Service credential operations are the next separately reviewed slice.
+## Native Telegram credentials
+
+Bot tokens and recipient chat IDs are stored only in Secret Service under the
+opaque profiles selected by Config v2.
+
+Bot-token attributes:
+
+```text
+application=history-dispatcher
+purpose=telegram-bot-token
+profile=<credential_ref>
+```
+
+Recipient-chat attributes:
+
+```text
+application=history-dispatcher
+purpose=telegram-chat-id
+profile=<recipient_ref>
+```
+
+`secret-tool store` receives the value through standard input. Secret values do
+not appear in argv, environment variables, TOML, SQLite, status, snapshots,
+audit rows or API responses. There is no plaintext-file, environment or random
+fallback.
+
+Additive Same-User-Socket operations:
+
+```text
+credential.get_status
+credential.preview_apply
+credential.apply
+```
+
+`credential.preview_apply` validates set/replace/delete, kind and Config-v2
+profile authorization. It holds the write-only value only in a bounded
+60-second in-memory preview. The response contains a fingerprint, confirmation
+`CREDENTIAL <ACTION> <first-12-fingerprint-characters>` and a one-use token, but
+never the secret.
+
+`credential.apply` is durably request-idempotent and returns only action, kind,
+opaque profile, configured state and timestamp. Secret-Service mutation is
+verified before secret-free metadata and audit are committed. A DB/audit failure
+restores the previous secret; compensation failure is terminal as
+`credential_rollback_failed`.
+
+Public status uses metadata only and exposes only:
+
+```json
+{"configured": true, "last_changed": "timestamp"}
+```
+
+See [`docs/native-telegram-credentials.md`](docs/native-telegram-credentials.md).
+
+This boundary intentionally performs no Telegram network request. `getMe`, test
+messages and the Bot API worker belong to the next separately reviewed slice.
 
 ## Codex classification fixtures
 
@@ -158,14 +210,14 @@ Completioncallback can be rebound to a new token after a long outage. A worker
 must never use such a claim for a new Telegram send. See
 [`docs/provider-api-v2.md`](docs/provider-api-v2.md).
 
-The TeeBotus provider is already integrated against this contract. A native
-History-Dispatcher Bot-API worker and write-only Secret-Service credential
-operations remain separate later slices. The current status API therefore
-exposes no token and reports the native credential as not configured.
+The TeeBotus provider is already integrated against this contract. The native
+History-Dispatcher worker may now use the internal credential lookup boundary,
+but the Bot API client, formatting, rate-limit handling and systemd worker remain
+the next slice.
 
 ## Migrations
 
-Database v2 defaults to a write-free dry run:
+### Database v2
 
 ```bash
 python scripts/migrate_database_v2.py preflight
@@ -174,7 +226,7 @@ python scripts/migrate_database_v2.py migrate
 
 A real write requires `--apply --confirm MIGRATE-V2`.
 
-Provider-bound delivery schema v3 also defaults to dry run:
+### Provider-bound delivery schema v3
 
 ```bash
 python scripts/migrate_delivery_v3.py preflight
@@ -182,8 +234,26 @@ python scripts/migrate_delivery_v3.py migrate
 python scripts/migrate_delivery_v3.py verify
 ```
 
-A real write requires `--apply --confirm MIGRATE-V3`. Neither migration starts a
-network worker or reactivates Legacy deliveries.
+A real write requires `--apply --confirm MIGRATE-V3`.
+
+### Credential metadata schema v4
+
+```bash
+python scripts/migrate_credentials_v4.py preflight
+python scripts/migrate_credentials_v4.py migrate
+python scripts/migrate_credentials_v4.py verify
+```
+
+A real write requires:
+
+```bash
+python scripts/migrate_credentials_v4.py migrate \
+  --apply \
+  --confirm MIGRATE-CREDENTIALS-V4
+```
+
+All migrations default to write-free dry runs. None starts a network worker or
+reactivates Legacy deliveries.
 
 ## Cinnamon applet
 
@@ -196,5 +266,5 @@ python scripts/install_cinnamon_applet.py --dry-run
 The Applet remains a bounded snapshot/socket client. It does not read
 credentials, open Telegram connections or participate in delivery claims.
 
-The later provider selector consumes the Config-v2 preview/apply API; it must not
-store provider decisions or credentials in dconf.
+The later provider selector consumes Config-v2 and Credential preview/apply APIs;
+it must not store provider decisions or credentials in dconf.
