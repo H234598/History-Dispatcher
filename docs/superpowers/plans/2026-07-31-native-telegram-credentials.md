@@ -17,7 +17,7 @@ aliases:
 
 # Native Telegram Credentials Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add a write-only native Telegram Secret-Service boundary for bot-token and recipient-chat-ID profiles, with explicit schema migration, preview/apply authorization, secret-free status and full rollback, without sending a Telegram request.
 
@@ -57,7 +57,7 @@ aliases:
 - Consumes: `verify_database_v3()`, v2 backup helpers and `SecretServiceKeyProvider`.
 - Produces: `DatabaseV4Migrator`, `MigrationV4Report`, `verify_database_v4()` and schema tables `telegram_secret_metadata`, `credential_audit`.
 
-- [ ] **Step 1: Write failing schema-v4 tests**
+- [x] **Step 1: Write failing schema-v4 tests**
 
 Create v3 fixtures and assert a write-free dry run reports:
 
@@ -99,7 +99,7 @@ CREATE TABLE credential_audit (
 
 Also test backup mode `0600`, directory mode `0700`, active-claim rejection, idempotent second run, trigger/constraint enforcement, `quick_check`, foreign keys and no secret columns.
 
-- [ ] **Step 2: Run the focused migration tests**
+- [x] **Step 2: Run the focused migration tests**
 
 ```bash
 python -m pytest tests/test_migration_v4.py tests/test_credential_migration_cli.py -q --tb=short
@@ -107,7 +107,7 @@ python -m pytest tests/test_migration_v4.py tests/test_credential_migration_cli.
 
 Expected: import failure because schema v4 and its CLI do not exist.
 
-- [ ] **Step 3: Implement schema and explicit migrator**
+- [x] **Step 3: Implement schema and explicit migrator**
 
 Set:
 
@@ -118,7 +118,7 @@ V4_TABLES = ("telegram_secret_metadata", "credential_audit")
 
 Require complete v3 verification and no active v1 or target-specific claims. Use the existing owner/symlink/integrity helpers, online backup and one `BEGIN IMMEDIATE` transaction. Insert only schema migration metadata; never inspect or create a secret.
 
-- [ ] **Step 4: Implement dry-run-by-default CLI**
+- [x] **Step 4: Implement dry-run-by-default CLI**
 
 Commands:
 
@@ -136,7 +136,7 @@ A real write requires:
 
 Emit compact finite JSON only.
 
-- [ ] **Step 5: Run migration and regression tests**
+- [x] **Step 5: Run migration and regression tests**
 
 ```bash
 python -m pytest \
@@ -148,7 +148,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add history_dispatcher/schema_v4.py history_dispatcher/migrations \
@@ -170,7 +170,7 @@ git commit -m "feat: add credential metadata schema v4"
 - Produces: `TelegramSecretKind`, `TelegramSecretError`, `TelegramSecretBackend`, `SecretToolTelegramBackend` and `NativeTelegramSecretStore`.
 - Internal lookup methods are consumed only by Task 3 and the later native worker.
 
-- [ ] **Step 1: Write failing validation and subprocess-boundary tests**
+- [x] **Step 1: Write failing validation and subprocess-boundary tests**
 
 Test valid examples:
 
@@ -193,7 +193,7 @@ and the token appears only in `input`. Similarly assert `clear` and `lookup`
 attributes for both secret kinds. Failed stdout/stderr must not appear in raised
 messages.
 
-- [ ] **Step 2: Run tests and observe missing module**
+- [x] **Step 2: Run tests and observe missing module**
 
 ```bash
 python -m pytest tests/test_telegram_secrets.py -q --tb=short
@@ -201,7 +201,7 @@ python -m pytest tests/test_telegram_secrets.py -q --tb=short
 
 Expected: module import failure.
 
-- [ ] **Step 3: Implement typed secret backend**
+- [x] **Step 3: Implement typed secret backend**
 
 Define:
 
@@ -218,7 +218,7 @@ class TelegramSecretBackend(Protocol):
 
 `SecretToolTelegramBackend` uses `subprocess.run(check=False, capture_output=True, timeout=5)` and passes store values through `input=value.encode("utf-8")`. It never includes a value in argv or an exception.
 
-- [ ] **Step 4: Implement native internal store**
+- [x] **Step 4: Implement native internal store**
 
 `NativeTelegramSecretStore` normalizes profiles with the existing Config-v2 opaque-profile helper and exposes:
 
@@ -233,7 +233,7 @@ clear_chat_id(profile_ref: str) -> bool
 
 Lookup raises `TelegramSecretError("... is unavailable")` without value or backend stderr.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 ```bash
 python -m pytest tests/test_telegram_secrets.py -q --tb=short
@@ -241,7 +241,7 @@ python -m pytest tests/test_telegram_secrets.py -q --tb=short
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add history_dispatcher/telegram_secrets.py tests/test_telegram_secrets.py
@@ -261,7 +261,7 @@ git commit -m "feat: add strict Telegram Secret-Service store"
 - Consumes: `NativeTelegramSecretStore`, schema-v4 metadata/audit, existing HMAC identifiers and Config-v2 profile authorization.
 - Produces: `CredentialManager`, `CredentialPreview`, `CredentialApplyError`, `get_status()`, `preview_apply()` and `apply_preview()`.
 
-- [ ] **Step 1: Write failing preview tests**
+- [x] **Step 1: Write failing preview tests**
 
 Preview input:
 
@@ -279,7 +279,7 @@ assert preview.confirmation == (
 
 Test set/replace require a value, delete forbids a value, kind/profile must be currently authorized by Config v2, token/chat-ID values are validated, preview expires after 60 seconds, registry is capped at 128 and no secret is returned or stored in SQLite.
 
-- [ ] **Step 2: Run preview tests**
+- [x] **Step 2: Run preview tests**
 
 ```bash
 python -m pytest tests/test_credential_manager_preview.py -q --tb=short
@@ -287,11 +287,11 @@ python -m pytest tests/test_credential_manager_preview.py -q --tb=short
 
 Expected: missing `CredentialManager`.
 
-- [ ] **Step 3: Implement bounded in-memory previews**
+- [x] **Step 3: Implement bounded in-memory previews**
 
 Use a frozen entry containing action, kind, HMAC-pseudonymized profile key, raw profile for backend attributes, secret value only in memory, fingerprint, token hash and expiry. Fingerprint canonical JSON includes action/kind/profile and an HMAC of the secret value derived from the payload key; the HMAC is not returned separately.
 
-- [ ] **Step 4: Write failing apply/compensation tests**
+- [x] **Step 4: Write failing apply/compensation tests**
 
 Cover:
 
@@ -312,7 +312,7 @@ identical Request-ID replay is handled later by service without second secret mu
 
 Assert database bytes never contain token, chat ID, raw profile or preview token.
 
-- [ ] **Step 5: Implement compensated apply**
+- [x] **Step 5: Implement compensated apply**
 
 Inside one manager lock:
 
@@ -341,11 +341,11 @@ Public result:
 }
 ```
 
-- [ ] **Step 6: Implement metadata status**
+- [x] **Step 6: Implement metadata status**
 
 `get_status(config)` returns only the configured bot profile and currently configured recipient profiles. Missing rows return `configured=false`, `last_changed=null`. Never call internal secret lookup from the public status method.
 
-- [ ] **Step 7: Run focused tests**
+- [x] **Step 7: Run focused tests**
 
 ```bash
 python -m pytest \
@@ -356,7 +356,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add history_dispatcher/credential_manager.py \
@@ -380,7 +380,7 @@ git commit -m "feat: add compensated Telegram credential manager"
 - Produces operations `credential.get_status`, `credential.preview_apply`, `credential.apply`.
 - Consumes `CredentialManager` and exposes no secret lookup method.
 
-- [ ] **Step 1: Write failing service/socket tests**
+- [x] **Step 1: Write failing service/socket tests**
 
 Test direct service and `ControlServer` flows:
 
@@ -401,7 +401,7 @@ Verify:
 - responses, status-v2 snapshot, TOML, SQLite and service error text contain no token or chat ID;
 - legacy Config and Provider-v2 operations remain green.
 
-- [ ] **Step 2: Run tests and observe unknown operations**
+- [x] **Step 2: Run tests and observe unknown operations**
 
 ```bash
 python -m pytest tests/test_credential_service.py -q --tb=short
@@ -409,7 +409,7 @@ python -m pytest tests/test_credential_service.py -q --tb=short
 
 Expected: `unknown_operation` failures.
 
-- [ ] **Step 3: Integrate manager lazily**
+- [x] **Step 3: Integrate manager lazily**
 
 Add operations:
 
@@ -423,7 +423,7 @@ credential.apply
 
 The service creates `CredentialManager` lazily with current Config v2, schema-v4 database, payload key provider and `NativeTelegramSecretStore`.
 
-- [ ] **Step 4: Integrate status v2**
+- [x] **Step 4: Integrate status v2**
 
 Populate the existing bot credential block from metadata for the current `credential_ref`. Preserve exactly:
 
@@ -433,7 +433,7 @@ Populate the existing bot credential block from metadata for the current `creden
 
 Do not add recipient details or secret kinds to the public status snapshot.
 
-- [ ] **Step 5: Run service and regression tests**
+- [x] **Step 5: Run service and regression tests**
 
 ```bash
 python -m pytest \
@@ -447,7 +447,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add history_dispatcher/service.py history_dispatcher/status_v2.py \
@@ -472,7 +472,7 @@ git commit -m "feat: expose write-only Telegram credential API"
 - Consumes completed schema, store, manager and socket API.
 - Produces the operator contract and exact boundary before the native network worker.
 
-- [ ] **Step 1: Document migration and credential operations**
+- [x] **Step 1: Document migration and credential operations**
 
 Document schema-v4 dry run/apply/verify commands, Secret-Service attributes, preview/apply bodies, one-shot behavior, compensation, public status and deliberate absence of network validation.
 
@@ -490,11 +490,11 @@ Expected: all exit 0.
 
 Verify no production Config, schema, snapshot, audit fixture or log contains a token/chat-ID example outside negative tests and security prose. Inspect `git diff --check` and the full PR diff.
 
-- [ ] **Step 4: Update plan evidence**
+- [x] **Step 4: Update plan evidence**
 
 Mark `TG-D-002` complete only after write-only API, status, migration, compensation and leak tests are green. Keep native Bot API, network test and worker checkboxes open.
 
-- [ ] **Step 5: Commit documentation**
+- [x] **Step 5: Commit documentation**
 
 ```bash
 git add README.md docs
