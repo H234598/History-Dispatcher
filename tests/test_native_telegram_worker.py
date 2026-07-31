@@ -223,6 +223,7 @@ def test_worker_delivers_native_claim_through_provider_v2_lifecycle() -> None:
     assert [name for name, _body in provider.operations] == [
         "provider.v2.heartbeat",
         "provider.v2.claim",
+        "provider.v2.heartbeat",
         "provider.v2.register_recipients",
         "provider.v2.renew",
         "provider.v2.record_recipients",
