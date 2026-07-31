@@ -589,6 +589,7 @@ class NativeTelegramWorker:
                 "capability_version": NATIVE_TELEGRAM_CAPABILITY_V1,
                 "state": state,
                 "details": {
+                    "provider_id": NATIVE_PROVIDER_ID,
                     "claimed": report.claimed,
                     "delivered": report.delivered,
                     "failed": report.failed,
