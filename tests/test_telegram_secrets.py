@@ -108,6 +108,43 @@ def test_secret_tool_errors_do_not_expose_stderr_or_secret() -> None:
     assert "failed for" not in str(raised.value)
 
 
+def test_lookup_and_clear_distinguish_absence_from_backend_failure() -> None:
+    backend = SecretToolTelegramBackend(
+        runner=RecordingRunner(
+            responses=[
+                subprocess.CompletedProcess([], 1, stdout=b"", stderr=b""),
+                subprocess.CompletedProcess([], 1, stdout=b"", stderr=b""),
+                subprocess.CompletedProcess(
+                    [],
+                    1,
+                    stdout=b"",
+                    stderr=b"dbus connection failed for private secret",
+                ),
+                subprocess.CompletedProcess(
+                    [],
+                    1,
+                    stdout=b"",
+                    stderr=b"keyring unavailable for private secret",
+                ),
+            ]
+        )
+    )
+
+    assert backend.lookup(TelegramSecretKind.BOT_TOKEN, "telegram_primary") is None
+    assert backend.clear(TelegramSecretKind.BOT_TOKEN, "telegram_primary") is False
+    with pytest.raises(TelegramSecretError) as lookup_error:
+        backend.lookup(TelegramSecretKind.BOT_TOKEN, "telegram_primary")
+    with pytest.raises(TelegramSecretError) as clear_error:
+        backend.clear(TelegramSecretKind.BOT_TOKEN, "telegram_primary")
+
+    assert str(lookup_error.value) == "Secret Service lookup failed"
+    assert str(clear_error.value) == "Secret Service clear failed"
+    for message in (str(lookup_error.value), str(clear_error.value)):
+        assert "private secret" not in message
+        assert "dbus" not in message.casefold()
+        assert "keyring" not in message.casefold()
+
+
 @pytest.mark.parametrize(
     "token",
     [
@@ -121,7 +158,9 @@ def test_secret_tool_errors_do_not_expose_stderr_or_secret() -> None:
     ],
 )
 def test_bot_token_validation_is_strict(token: str) -> None:
-    store = NativeTelegramSecretStore(backend=SecretToolTelegramBackend(runner=RecordingRunner()))
+    store = NativeTelegramSecretStore(
+        backend=SecretToolTelegramBackend(runner=RecordingRunner())
+    )
 
     with pytest.raises(TelegramSecretError, match="bot token"):
         store.validate_bot_token(token)
@@ -132,7 +171,9 @@ def test_bot_token_validation_is_strict(token: str) -> None:
     ["", " 12345", "+12345", "chat", "-12", "1" * 30, "-10012\n345"],
 )
 def test_chat_id_validation_is_strict(chat_id: str) -> None:
-    store = NativeTelegramSecretStore(backend=SecretToolTelegramBackend(runner=RecordingRunner()))
+    store = NativeTelegramSecretStore(
+        backend=SecretToolTelegramBackend(runner=RecordingRunner())
+    )
 
     with pytest.raises(TelegramSecretError, match="chat ID"):
         store.validate_chat_id(chat_id)
@@ -140,7 +181,7 @@ def test_chat_id_validation_is_strict(chat_id: str) -> None:
 
 def test_native_store_validates_profiles_and_lookup_unavailability() -> None:
     runner = RecordingRunner(
-        responses=[subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"missing")]
+        responses=[subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"")]
     )
     store = NativeTelegramSecretStore(
         backend=SecretToolTelegramBackend(runner=runner)
