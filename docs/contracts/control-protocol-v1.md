@@ -27,7 +27,7 @@ oder ungültige Frames werden verworfen.
 {
   "protocol_version": 1,
   "request_id": "opaque-id",
-  "operation": "config.preview_apply",
+  "operation": "credential.preview_apply",
   "body": {}
 }
 ```
@@ -36,10 +36,11 @@ oder ungültige Frames werden verworfen.
 - `request_id` ist für idempotente Mutationen auf 128 Zeichen begrenzt und darf
   keine Steuerzeichen enthalten;
 - alle `provider.v2.*`-Operationen verlangen eine nicht leere Request-ID;
-- `config.validate_patch` und `config.preview_apply` verlangen eine nicht leere
+- `config.validate_patch`, `config.preview_apply` und previewgestütztes
+  `config.apply` verlangen eine nicht leere Request-ID;
+- `credential.preview_apply` und `credential.apply` verlangen eine nicht leere
   Request-ID;
-- previewgestütztes Config-v2-`config.apply` verlangt eine nicht leere
-  Request-ID;
+- `credential.get_status` ist read-only und benötigt keine Request-ID;
 - Legacy-`config.apply` mit flachem `values`-Objekt bleibt kompatibel und darf
   weiterhin ohne Request-ID aufgerufen werden;
 - ein fehlendes `body` entspricht `{}`;
@@ -66,8 +67,9 @@ Fehler:
 }
 ```
 
-Interne Tracebacks werden nicht ausgegeben. Fehlercodes sind auf 96 Zeichen,
-Fehlermeldungen auf 500 Zeichen begrenzt.
+Interne Tracebacks, Secret-Service-stdout/-stderr, Bot-Tokens und Chat-IDs werden
+nicht ausgegeben. Fehlercodes sind auf 96 Zeichen, Fehlermeldungen auf 500
+Zeichen begrenzt.
 
 ## Operation-Allowlist
 
@@ -89,6 +91,9 @@ config.validate
 config.validate_patch
 config.preview_apply
 config.apply
+credential.get_status
+credential.preview_apply
+credential.apply
 collector.collect
 admin.preview
 admin.execute
@@ -108,7 +113,7 @@ provider.v2.heartbeat
 `{ "version": 2, "status": { ... } }`; die v1-Statusoperationen bleiben
 unverändert.
 
-Die Config-v2-Operationen sind additive Same-User-Settingsoperationen:
+## Config-v2-Operationen
 
 - `config.get_redacted` liefert ausschließlich Routingrevision und opaque
   Telegramprofilnamen;
@@ -119,6 +124,59 @@ Die Config-v2-Operationen sind additive Same-User-Settingsoperationen:
 - Provideränderungen gelten ausschließlich für neue Route-Pläne.
 
 Der vollständige Vertrag steht in `docs/config-v2-api.md`.
+
+## Credential-Operationen
+
+### `credential.get_status`
+
+Read-only, Body exakt `{}`. Die Antwort enthält ausschließlich aktuell durch
+Config v2 autorisierte opaque Profile und secretfreie Metadaten:
+
+```json
+{
+  "schema_version": 1,
+  "bot": {
+    "profile_ref": "telegram_primary",
+    "configured": false,
+    "last_changed": null
+  },
+  "recipients": []
+}
+```
+
+Die Operation führt keinen Secret-Service-Lookup aus.
+
+### `credential.preview_apply`
+
+Sensible One-shot-Mutation. Erlaubte Felder:
+
+```text
+action = set | replace | delete
+secret_kind = bot_token | chat_id
+profile_ref = opaque Config-v2 profile
+secret_value = write-only, nur bei set/replace
+```
+
+Die Antwort enthält Fingerprint, exakte Bestätigung, 60-Sekunden-One-use-Token,
+Action, Kind und opaque Profil, aber niemals den Secretwert. Der Secretwert lebt
+nur im begrenzten In-Memory-Previewregister.
+
+### `credential.apply`
+
+Dauerhaft idempotente Mutation mit exakt:
+
+```text
+preview_token
+fingerprint
+confirmation = CREDENTIAL <ACTION> <erste 12 Fingerprint-Zeichen>
+```
+
+Die Antwort ist secretfrei und enthält nur Action, Kind, opaque Profil,
+`configured` und `last_changed`. Secret-Service-Mutation, Post-Write-Prüfung,
+Metadaten/Audit und kompensierender Rollback sind in
+`docs/native-telegram-credentials.md` beschrieben.
+
+## Provider-v2-Operationen
 
 Die Provider-v2-Operationen sind additive Same-User-Workeroperationen. Ihr
 vollständiger Body-/Responsevertrag steht in `docs/provider-api-v2.md`.
@@ -133,6 +191,7 @@ dispatch.retry
 delivery.record
 config.validate_patch
 config.apply
+credential.apply
 collector.collect
 admin.execute
 migration.import_legacy
@@ -158,10 +217,9 @@ Für jede solche Request-ID gilt:
    Reservierung offen und der Client erhält `idempotency_persist_failed`.
 8. Retention erfolgt ausschließlich über `maintenance.prune`.
 
-Für previewgestütztes Config-v2-`config.apply` enthält die dauerhaft gespeicherte
-Antwort niemals Previewtoken oder Patchwerte. Derselbe Request-ID-Replay liefert
-die sichere Applyantwort; derselbe verbrauchte Previewtoken mit einer anderen
-Request-ID wird abgewiesen.
+Previewgestütztes Config-v2- und Credential-`apply` speichern ausschließlich
+secretfreie Antworten. Derselbe Request-ID-Replay liefert dieselbe Antwort;
+ein verbrauchter Previewtoken unter einer anderen Request-ID wird abgewiesen.
 
 ## Sensible One-shot-Mutationen
 
@@ -169,6 +227,7 @@ Request-ID wird abgewiesen.
 provider.v2.claim
 provider.v2.reclaim
 config.preview_apply
+credential.preview_apply
 ```
 
 ### Providerclaims
@@ -185,35 +244,44 @@ frei; abgeschlossene Antworten können dadurch nicht gelöscht werden.
 
 `provider.v2.reclaim` ist zusätzlich auf reine Callback-/Completion-
 Reconciliation begrenzt. Ein erfolgreicher Eintrag trägt
-`reconciliation_only=true`, bindet exakt eine Target-Delivery und darf von einem
-Transportworker nicht als Autorisierung für einen neuen Send interpretiert
-werden.
+`reconciliation_only=true` und darf nie als Autorisierung für einen neuen Send
+interpretiert werden.
 
 ### Configpreview
 
 `config.preview_apply` liefert einen kurzlebigen geheimen Previewtoken. Die
-Antwort wird nie in `idempotency_results.response_json` gespeichert. Ein
-identischer Request-ID-Replay ergibt `idempotency_in_progress`; ein abweichender
-Replay `idempotency_conflict`.
+Antwort wird nie im Idempotenz-Responsecache gespeichert. Reine
+Patch-/Revisionsvalidierungsfehler geben die exakte leere Reservierung frei.
 
-Reine Patch-/Revisionsvalidierungsfehler geben ihre exakte noch leere
-Reservierung frei. Der Previewtoken selbst wird ausschließlich gehasht im
-begrenzten In-Memory-Previewregister gehalten und erscheint weder in TOML,
-Status, Snapshot noch Audit.
+### Credentialpreview
 
-## Config-v2-Bestätigung und Wirkung
+`credential.preview_apply` enthält im Request einen Secretwert und liefert einen
+kurzlebigen Previewtoken. Weder Requestbody noch Antwort werden als
+Idempotenzantwort gespeichert; gespeichert werden ausschließlich Operation und
+Requestfingerprint. Ein identischer Replay ergibt `idempotency_in_progress`.
 
-Ein produktiver Apply verlangt exakt:
+Reine Format-, Action-, Kind-, Profil- oder Configautorisierungsfehler geben die
+exakte leere Reservierung frei. Ein operationaler Secret-Service- oder
+Schemafehler bleibt pending, damit eine unbekannte Mutation nicht blind
+wiederholt wird.
+
+## Bestätigungen und Wirkung
+
+Config-v2:
 
 ```text
-expected_revision
-preview_token
-fingerprint
-confirmation = APPLY <erste 12 Fingerprint-Zeichen>
+APPLY <erste 12 Fingerprint-Zeichen>
 ```
 
-Die Wirkung ist hart als `new_route_plans_only` ausgewiesen. Der Apply ändert
-keine bestehenden Route-Pläne und führt keinen Cross-Provider-Fallback aus.
+Credential:
+
+```text
+CREDENTIAL <SET|REPLACE|DELETE> <erste 12 Fingerprint-Zeichen>
+```
+
+Config-v2 wirkt ausschließlich auf neue Route-Pläne. Credentialoperationen
+ändern ausschließlich den Secret-Service-Wert und dessen secretfreie Metadaten;
+sie senden keine Telegramnachricht und verändern keinen Route-Plan.
 
 ## Evolutionsregel
 
