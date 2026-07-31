@@ -434,6 +434,11 @@ git commit -m "feat: run native Telegram worker as hardened user service"
 - Task 4 RED: Actions run `30634792670` passed 359 tests and failed only on the missing CLI composition, worker unit and opt-in flag.
 - Task 4 functional GREEN: Actions run `30635017382` passed syntax, the complete suite and package build.
 - Task 4 cleaned status GREEN: Actions run `30635389842` passed after the one-shot status helper and workflow were removed.
+- Active-heartbeat RED: Actions run `30636282681` passed 363 tests and failed only because the `active` state was absent.
+- Active-heartbeat implementation alignment: Actions run `30636493474` passed 363 tests and failed only because the older lifecycle expectation did not yet include the new heartbeat.
+- Active-heartbeat GREEN: Actions run `30636841087` passed 364 tests, syntax and package build after the lifecycle expectation was updated.
+- Final documentation-head GREEN: Actions run `30637002376` passed 364 tests, syntax and package build.
+- Final PR diff inspection confirmed fixed `api.telegram.org:443`, no configurable URL/proxy/redirect/local-server path, Internet address families only in the dedicated worker unit, no raw Telegram message ID persistence, and concrete token/chat-ID values only in negative tests.
 - No live Telegram or production Secret-Service call was executed by these tests.
 
 ---
@@ -467,7 +472,7 @@ Record:
 - no proxy, redirect, fallback, rich formatting, inbound updates or live canary in this slice;
 - exact separation between functional tests and later live canaries.
 
-- [ ] **Step 2: Run complete verification**
+- [x] **Step 2: Run complete verification**
 
 ```bash
 python -m compileall -q history_dispatcher scripts tests
@@ -479,7 +484,7 @@ python -m build
 
 Expected: all commands exit 0.
 
-- [ ] **Step 3: Inspect leak and network boundaries**
+- [x] **Step 3: Inspect leak and network boundaries**
 
 Inspect the full PR diff and verify:
 

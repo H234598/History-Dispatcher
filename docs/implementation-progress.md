@@ -192,10 +192,11 @@ PR #15 implementiert den nativen Telegramworker:
 - [x] CLI-Befehl `telegram-worker` und Signalstop implementiert;
 - [x] separate gehärtete systemd-Workerunit implementiert; ausschließlich diese Unit erhält `AF_INET/AF_INET6`;
 - [x] Workeraktivierung bleibt explizites Opt-in `--enable-telegram-worker`;
-- [x] redigierte Status-v2-Providererkennung aus Heartbeatdetails implementiert;
+- [x] redigierte Status-v2-Providererkennung mit `starting → active → idle/degraded/blocked` aus Heartbeatdetails implementiert;
 - [x] Task-4-Abschlusshead auf Actions-Lauf `30635389842` mit Syntax, vollständiger Testsuite und Paketbuild grün;
 - [x] Betreiber-Runbook `docs/native-telegram-worker.md`, README, Telegram-Addendum und Control-Protokoll aktualisiert;
-- [ ] vollständigen Leak-/Netzwerkgrenzenscan auf finalem Dokumentationshead durchführen;
+- [x] finaler Dokumentationshead auf Actions-Lauf `30637002376` mit 364 Tests, Syntax und Paketbuild grün;
+- [x] vollständigen Leak-/Netzwerkgrenzenscan durchgeführt: fixed Host, keine Proxy-/Redirect-/URL-Konfiguration, nur Worker mit `AF_INET/AF_INET6`, keine rohe Message-ID-Persistenz und konkrete Secrets nur in Negativtests;
 - [ ] qlty und CodeRabbit auf finalem Head grün;
 - [ ] keine offenen Reviewthreads;
 - [ ] PR #15 gegen exakte geprüfte Head-SHA squash-mergen;
