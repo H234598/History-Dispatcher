@@ -48,7 +48,7 @@ def main() -> None:
     progress = replace_once(
         progress,
         "**Aktiver Schnitt:** PR #13 `codex/native-telegram-credentials`  \n**Nächster Schnitt:** nativer Telegram-Bot-API-Worker",
-        "**Abgeschlossener Schnitt:** PR #13 native Telegram-Credentialgrenze  \n**Aktiver nächster Schnitt:** nativer Telegram-Bot-API-Worker",
+        "**Abgeschlossener Schnitt:** PR #13 native Telegram-Credentialgrenze\n\n**Aktiver nächster Schnitt:** nativer Telegram-Bot-API-Worker",
         label="progress active slice",
     )
     progress = replace_once(
