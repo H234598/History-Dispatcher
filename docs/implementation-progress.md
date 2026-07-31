@@ -141,9 +141,9 @@ aliases:
 - [x] Betreiber-Runbook `docs/native-telegram-credentials.md` angelegt;
 - [x] Control-Protokoll um Credentialoperationen und Idempotenzregeln erweitert;
 - [x] Fortschrittsplan auf tatsächlichen Merge-/Teststand aktualisiert;
-- [ ] Telegram-Addendum und README final aktualisiert;
-- [ ] ausführbaren TDD-Plan mit belegter Evidenz abhaken;
-- [ ] repositoryweiten Leakscan und vollständige Verifikation auf finalem Dokumentationshead durchführen;
+- [x] Telegram-Addendum und README final aktualisiert;
+- [x] ausführbaren TDD-Plan mit belegter Evidenz abgeglichen;
+- [x] repositoryweiten Leakscan durchgeführt; Funktionshead `60103e66d8785a79abe6a7dd3f90d3e116789cc1` mit 298 Tests, Syntax und Paketbuild grün;
 - [ ] GitHub Actions, qlty und CodeRabbit auf finalem Head grün;
 - [ ] keine offenen Reviewthreads;
 - [ ] PR #13 aus Draft nehmen und gegen exakte Head-SHA squash-mergen.

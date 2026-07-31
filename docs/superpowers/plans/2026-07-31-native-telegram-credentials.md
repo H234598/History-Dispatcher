@@ -476,7 +476,7 @@ git commit -m "feat: expose write-only Telegram credential API"
 
 Document schema-v4 dry run/apply/verify commands, Secret-Service attributes, preview/apply bodies, one-shot behavior, compensation, public status and deliberate absence of network validation.
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 ```bash
 python -m compileall -q history_dispatcher scripts tests
@@ -486,7 +486,7 @@ python -m build
 
 Expected: all exit 0.
 
-- [ ] **Step 3: Inspect leak boundary**
+- [x] **Step 3: Inspect leak boundary**
 
 Verify no production Config, schema, snapshot, audit fixture or log contains a token/chat-ID example outside negative tests and security prose. Inspect `git diff --check` and the full PR diff.
 
