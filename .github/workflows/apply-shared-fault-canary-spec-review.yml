@@ -1,0 +1,38 @@
+name: apply-shared-fault-canary-spec-review
+
+on:
+  push:
+    branches:
+      - codex/shared-telegram-fault-canary-design
+    paths:
+      - scripts/_patch_shared_fault_canary_spec_once.py
+      - .github/workflows/apply-shared-fault-canary-spec-review.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/shared-telegram-fault-canary-design
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Apply reviewed spec clarifications
+        run: |
+          python scripts/_patch_shared_fault_canary_spec_once.py
+          git diff --check
+      - name: Commit reviewed spec
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/superpowers/specs/2026-07-31-shared-telegram-fault-canary-design.md
+          git commit -m "docs: clarify shared Telegram fault and canary design"
+          git push origin HEAD:codex/shared-telegram-fault-canary-design
