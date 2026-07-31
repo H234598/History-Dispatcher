@@ -116,6 +116,8 @@ class SecretToolTelegramBackend:
             ["secret-tool", "lookup", *self._attributes(kind, profile_ref)]
         )
         if completed.returncode != 0:
+            if completed.stderr:
+                raise TelegramSecretError("Secret Service lookup failed")
             return None
         try:
             value = completed.stdout.decode("utf-8").strip()
@@ -151,6 +153,8 @@ class SecretToolTelegramBackend:
         completed = self._run(
             ["secret-tool", "clear", *self._attributes(kind, profile_ref)]
         )
+        if completed.returncode != 0 and completed.stderr:
+            raise TelegramSecretError("Secret Service clear failed")
         return completed.returncode == 0
 
 
