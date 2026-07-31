@@ -7,7 +7,7 @@ tags:
   - secret-service
   - tdd
 type: implementation-plan
-status: active
+status: completed
 created: 2026-07-31
 date: 2026-07-31
 aliases:
@@ -501,6 +501,6 @@ git add README.md docs
 git commit -m "docs: complete native Telegram credential boundary"
 ```
 
-- [ ] **Step 6: Enforce merge gates**
+- [x] **Step 6: Enforce merge gates**
 
 Open or update the draft PR. Require GitHub Actions, qlty, CodeRabbit and zero unresolved review threads on the exact final Head SHA before marking ready and squash-merging.

@@ -20,10 +20,11 @@ aliases:
 **Planquelle:** `HISTORY_DISPATCHER_CINNAMON_APPLET_IMPLEMENTIERUNGSPLAN`, SHA-256 `a1f52c11117a063702f4cff008c9d24646f8f33a7540cdd1bf48ab220053ba0c`  
 **Telegram-Addendum:** `docs/implementation-plan-addendum-telegram.md`  
 **Ausgangsbasis:** `main@8f0bb05a540942e61c979a51bbaeca32d4308eb1`  
-**Aktueller History-Dispatcher-Main:** `decd370f8359979beff59da0b4dbf81208fb044a`  
+**Aktueller History-Dispatcher-Main:** `cd35d5807cef1834e0c4d6d6f0a18e81b7e3cda4`
 **Aktueller TeeBotus-Main:** `36c75843a5910cc3b22ffdd9a5ec87eb1d5b2ea9`  
-**Aktiver Schnitt:** PR #13 `codex/native-telegram-credentials`  
-**Nächster Schnitt:** nativer Telegram-Bot-API-Worker
+**Abgeschlossener Schnitt:** PR #13 native Telegram-Credentialgrenze
+
+**Aktiver nächster Schnitt:** nativer Telegram-Bot-API-Worker
 
 ## Gemergte History-Dispatcher-Schnitte
 
@@ -41,6 +42,7 @@ aliases:
 | PR-HD-08c | gezielter Reclaim abgelaufener Providerclaims | `0934e85e53ae03d97df57ef494cd1aec7d141ef3` |
 | PR-HD-11-plan | Reclaim-/TeeBotus-Merge-SHAs synchronisiert | `7d3944bc1bf70114a4b0c381014eabbc3e84c30c` |
 | PR-HD-12 | produktiver Config-v2-Writer, Preview/Apply, Audit und Same-User-API | `decd370f8359979beff59da0b4dbf81208fb044a` |
+| PR-HD-13 | Secret-Service-Credentialgrenze, Schema v4, Kompensation und write-only Same-User-API | `cd35d5807cef1834e0c4d6d6f0a18e81b7e3cda4` |
 
 ## Gemergte TeeBotus-Schnitte
 
@@ -144,13 +146,13 @@ aliases:
 - [x] Telegram-Addendum und README final aktualisiert;
 - [x] ausführbaren TDD-Plan mit belegter Evidenz abgeglichen;
 - [x] repositoryweiten Leakscan durchgeführt; Funktionshead `60103e66d8785a79abe6a7dd3f90d3e116789cc1` mit 298 Tests, Syntax und Paketbuild grün;
-- [ ] GitHub Actions, qlty und CodeRabbit auf finalem Head grün;
-- [ ] keine offenen Reviewthreads;
-- [ ] PR #13 aus Draft nehmen und gegen exakte Head-SHA squash-mergen.
+- [x] GitHub Actions, qlty und CodeRabbit auf finalem Head `c8da7593d235af6e03c101bc0ee4242690c9a0f9` grün;
+- [x] keine offenen Reviewthreads;
+- [x] PR #13 gegen `c8da7593d235af6e03c101bc0ee4242690c9a0f9` squash-gemergt; Main-Commit `cd35d5807cef1834e0c4d6d6f0a18e81b7e3cda4`.
 
 ## Bewusste Schnittgrenze
 
-PR #13 führt keine Telegram-Netzwerkoperation aus. Es gibt weder `getMe` noch
+Der gemergte PR #13 führt keine Telegram-Netzwerkoperation aus. Es gibt weder `getMe` noch
 Testnachricht, Bot-API-Client, Formatter, Rate-Limit-Handling oder systemd-
 Worker. Der öffentliche API-Vertrag bleibt write-only: Secretwerte werden nie
 ausgelesen oder zurückgegeben.
@@ -162,7 +164,7 @@ nicht über den öffentlichen Status gespiegelt werden.
 
 ## Nächster sequenzieller Schnitt
 
-Nach Merge von PR #13 folgt der native Telegramworker:
+Als nächster Schnitt folgt der native Telegramworker:
 
 1. interner Bot-Token- und Chat-ID-Lookup;
 2. gehärteter Bot-API-Client mit TLS, Timeouts und bounded Antworten;
