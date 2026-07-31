@@ -544,7 +544,7 @@ Record:
 - deliberate absence of actual bot-token writes;
 - next slice: native credential provider and write-only Secret-Service operations.
 
-- [ ] **Step 2: Run complete verification**
+- [x] **Step 2: Run complete verification**
 
 ```bash
 python -m compileall -q history_dispatcher scripts tests
@@ -575,7 +575,7 @@ git add README.md docs
 git commit -m "docs: complete productive Config v2 writer"
 ```
 
-- [ ] **Step 6: Open PR and enforce gates**
+- [x] **Step 6: Open PR and enforce gates**
 
 Create a draft PR titled:
 
